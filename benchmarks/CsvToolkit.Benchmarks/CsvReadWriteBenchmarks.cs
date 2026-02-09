@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Order;
-using CsvHelper;
 using CsvHelper.Configuration;
 
 namespace CsvToolkit.Benchmarks;
@@ -18,8 +17,7 @@ public class CsvReadWriteBenchmarks
     private string _csvSemicolonQuoted = string.Empty;
     private byte[] _csvSemicolonQuotedUtf8 = [];
 
-    [Params(100_000)]
-    public int RowCount { get; set; }
+    [Params(100_000)] public int RowCount { get; set; }
 
     [GlobalSetup]
     public void Setup()
@@ -72,7 +70,8 @@ public class CsvReadWriteBenchmarks
     public int CsvHelper_ReadTyped_Stream()
     {
         using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
-        using var textReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 16 * 1024, leaveOpen: false);
+        using var textReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+            bufferSize: 16 * 1024, leaveOpen: false);
         using var csv = new CsvHelper.CsvReader(textReader, new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             HasHeaderRecord = true,
@@ -111,7 +110,8 @@ public class CsvReadWriteBenchmarks
     public int CsvHelper_ReadDynamic_Stream()
     {
         using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
-        using var textReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 16 * 1024, leaveOpen: false);
+        using var textReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+            bufferSize: 16 * 1024, leaveOpen: false);
         using var csv = new CsvHelper.CsvReader(textReader, new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             HasHeaderRecord = true,
@@ -198,7 +198,8 @@ public class CsvReadWriteBenchmarks
     public int CsvHelper_ReadTyped_SemicolonHighQuote()
     {
         using var stream = new MemoryStream(_csvSemicolonQuotedUtf8, writable: false);
-        using var textReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 16 * 1024, leaveOpen: false);
+        using var textReader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
+            bufferSize: 16 * 1024, leaveOpen: false);
         using var csv = new CsvHelper.CsvReader(textReader, new CsvConfiguration(CultureInfo.InvariantCulture)
         {
             HasHeaderRecord = true,
@@ -214,7 +215,8 @@ public class CsvReadWriteBenchmarks
         return count;
     }
 
-    private static string GenerateCsv(IEnumerable<BenchmarkRecord> records, char delimiter, double quoteFrequency, string newLine)
+    private static string GenerateCsv(IEnumerable<BenchmarkRecord> records, char delimiter, double quoteFrequency,
+        string newLine)
     {
         var random = new Random(123);
         var builder = new StringBuilder(capacity: 32 * 1024);
@@ -230,9 +232,11 @@ public class CsvReadWriteBenchmarks
             builder.Append(delimiter);
             AppendValue(builder, record.Name, delimiter, random, quoteFrequency);
             builder.Append(delimiter);
-            AppendValue(builder, record.Amount.ToString(CultureInfo.InvariantCulture), delimiter, random, quoteFrequency);
+            AppendValue(builder, record.Amount.ToString(CultureInfo.InvariantCulture), delimiter, random,
+                quoteFrequency);
             builder.Append(delimiter);
-            AppendValue(builder, record.CreatedAt.ToString("O", CultureInfo.InvariantCulture), delimiter, random, quoteFrequency);
+            AppendValue(builder, record.CreatedAt.ToString("O", CultureInfo.InvariantCulture), delimiter, random,
+                quoteFrequency);
             builder.Append(delimiter);
             AppendValue(builder, record.IsActive ? "true" : "false", delimiter, random, quoteFrequency);
             builder.Append(newLine);
@@ -241,10 +245,12 @@ public class CsvReadWriteBenchmarks
         return builder.ToString();
     }
 
-    private static void AppendValue(StringBuilder builder, string value, char delimiter, Random random, double quoteFrequency)
+    private static void AppendValue(StringBuilder builder, string value, char delimiter, Random random,
+        double quoteFrequency)
     {
         var forceQuote = random.NextDouble() < quoteFrequency;
-        var shouldQuote = forceQuote || value.Contains(delimiter) || value.Contains('"') || value.Contains('\n') || value.Contains('\r');
+        var shouldQuote = forceQuote || value.Contains(delimiter) || value.Contains('"') || value.Contains('\n') ||
+                          value.Contains('\r');
 
         if (!shouldQuote)
         {
@@ -268,7 +274,7 @@ public class CsvReadWriteBenchmarks
         builder.Append('"');
     }
 
-    public sealed class BenchmarkRecord
+    private sealed class BenchmarkRecord
     {
         public int Id { get; set; }
 

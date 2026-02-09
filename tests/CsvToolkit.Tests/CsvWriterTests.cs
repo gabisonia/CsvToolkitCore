@@ -41,6 +41,28 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void WriteField_WithTabDelimiter_QuotesWhenNeeded()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            Delimiter = '\t',
+            NewLine = "\n"
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("Ada\tLovelace");
+        writer.WriteField("Math");
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("\"Ada\tLovelace\"\tMath\n", result);
+    }
+
+    [Fact]
     public void WriteHeaderAndRecord_WritesPoco()
     {
         // Arrange

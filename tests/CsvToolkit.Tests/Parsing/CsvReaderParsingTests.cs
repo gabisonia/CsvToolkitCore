@@ -66,6 +66,47 @@ public sealed class CsvReaderParsingTests
         Assert.Equal("Ada", row.GetFieldString(1));
     }
 
+    [Theory]
+    [InlineData(';', "id;name\n1;Ada\n")]
+    [InlineData('|', "id|name\n1|Ada\n")]
+    [InlineData('\t', "id\tname\n1\tAda\n")]
+    public void TryReadRow_SupportsMultipleDelimiters(char delimiter, string csv)
+    {
+        // Arrange
+        var options = new CsvOptions { Delimiter = delimiter };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.TryReadRow(out var row);
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("1", row.GetFieldString(0));
+        Assert.Equal("Ada", row.GetFieldString(1));
+    }
+
+    [Fact]
+    public void TryReadRow_SupportsCustomQuoteAndEscape()
+    {
+        // Arrange
+        const string csv = "id;name;note\n1;'Ada;Lovelace';'It\\'s fine'\n";
+        var options = new CsvOptions
+        {
+            Delimiter = ';',
+            Quote = '\'',
+            Escape = '\\'
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.TryReadRow(out var row);
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("Ada;Lovelace", row.GetFieldString(1));
+        Assert.Equal("It's fine", row.GetFieldString(2));
+    }
+
     [Fact]
     public void TryReadDictionary_UsesHeaderNames()
     {
