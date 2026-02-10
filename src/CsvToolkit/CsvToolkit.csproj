@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
     <IsPackable>true</IsPackable>
-    <PackageId>CsvToolkit</PackageId>
+    <PackageId>CsvToolkit.Core</PackageId>
     <Title>CsvToolkit</Title>
     <Description>High-performance CSV reader/writer for .NET with streaming APIs and low allocations.</Description>
     <Authors>gabisonia</Authors>
