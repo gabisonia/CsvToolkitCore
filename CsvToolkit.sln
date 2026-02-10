@@ -5,7 +5,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsvToolkit", "src\CsvToolkit\CsvToolkit.csproj", "{6CFFFDDF-1DA0-47AA-B14A-8EBC0A88529F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsvToolkit.Core", "src\CsvToolkit.Core\CsvToolkit.Core.csproj", "{6CFFFDDF-1DA0-47AA-B14A-8EBC0A88529F}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
@@ -14,6 +14,10 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{66320409-64EC-F7C5-3DEF-65E7510DAAD1}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsvToolkit.Benchmarks", "benchmarks\CsvToolkit.Benchmarks\CsvToolkit.Benchmarks.csproj", "{8C4BE1A7-F584-44D9-AB23-5E0CA56A99D1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "examples", "examples", "{B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsvToolkit.Sample", "examples\CsvToolkit.Sample\CsvToolkit.Sample.csproj", "{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -61,6 +65,18 @@ Global
 		{8C4BE1A7-F584-44D9-AB23-5E0CA56A99D1}.Release|x64.Build.0 = Release|Any CPU
 		{8C4BE1A7-F584-44D9-AB23-5E0CA56A99D1}.Release|x86.ActiveCfg = Release|Any CPU
 		{8C4BE1A7-F584-44D9-AB23-5E0CA56A99D1}.Release|x86.Build.0 = Release|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Debug|x64.Build.0 = Debug|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Debug|x86.Build.0 = Debug|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Release|x64.ActiveCfg = Release|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Release|x64.Build.0 = Release|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Release|x86.ActiveCfg = Release|Any CPU
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -69,5 +85,6 @@ Global
 		{6CFFFDDF-1DA0-47AA-B14A-8EBC0A88529F} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{714E6D42-38E9-4B91-B2A9-CD4E56B40A3D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{8C4BE1A7-F584-44D9-AB23-5E0CA56A99D1} = {66320409-64EC-F7C5-3DEF-65E7510DAAD1}
+		{B8AFD2A6-75F9-4AFE-8EE4-3ED9C9A2D601} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 	EndGlobalSection
 EndGlobal

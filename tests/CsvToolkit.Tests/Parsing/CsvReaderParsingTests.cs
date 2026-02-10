@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace CsvToolkit.Tests.Parsing;
+namespace CsvToolkit.Core.Tests.Parsing;
 
 public sealed class CsvReaderParsingTests
 {

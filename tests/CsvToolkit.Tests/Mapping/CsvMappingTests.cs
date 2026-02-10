@@ -1,8 +1,8 @@
 using System.Globalization;
-using CsvToolkit.Mapping;
-using CsvToolkit.TypeConversion;
+using CsvToolkit.Core.Mapping;
+using CsvToolkit.Core.TypeConversion;
 
-namespace CsvToolkit.Tests.Mapping;
+namespace CsvToolkit.Core.Tests.Mapping;
 
 public sealed class CsvMappingTests
 {

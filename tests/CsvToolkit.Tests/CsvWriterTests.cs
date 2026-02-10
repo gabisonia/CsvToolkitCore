@@ -1,7 +1,7 @@
-using CsvToolkit.Mapping;
-using CsvToolkit.TypeConversion;
+using CsvToolkit.Core.Mapping;
+using CsvToolkit.Core.TypeConversion;
 
-namespace CsvToolkit.Tests;
+namespace CsvToolkit.Core.Tests;
 
 public sealed class CsvWriterTests
 {

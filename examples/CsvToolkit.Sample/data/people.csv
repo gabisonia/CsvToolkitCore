@@ -1,0 +1,4 @@
+person_id,full_name,email,age,birth_date
+1,Alice Johnson,alice@example.com,31,1994-08-12
+2,Bob Smith,bob@example.com,27,1998-03-05
+3,Carla Diaz,carla@example.com,43,1982-11-21

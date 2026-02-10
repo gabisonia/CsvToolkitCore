@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+
+        <IsPackable>true</IsPackable>
+        <PackageId>CsvToolkit.Core</PackageId>
+        <Title>CsvToolkit.Core</Title>
+        <Description>High-performance CSV reader/writer for .NET with streaming APIs and low allocations.</Description>
+        <Authors>Irakli Gabisonia</Authors>
+        <PackageTags>csv;parser;writer;streaming;dotnet</PackageTags>
+        <PackageProjectUrl>https://github.com/gabisonia/CsvToolkit</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/gabisonia/CsvToolkit</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+
+        <VersionPrefix>0.1.0</VersionPrefix>
+        <VersionSuffix>beta.3</VersionSuffix>
+
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath="/"/>
+    </ItemGroup>
+
+</Project>

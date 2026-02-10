@@ -4,7 +4,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Order;
 using CsvHelper.Configuration;
 
-namespace CsvToolkit.Benchmarks;
+namespace CsvToolkit.Core.Benchmarks;
 
 [MemoryDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
