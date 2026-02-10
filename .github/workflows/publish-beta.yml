@@ -59,7 +59,7 @@ jobs:
 
       - name: Pack
         run: |
-          dotnet pack src/CsvToolkit/CsvToolkit.csproj \
+          dotnet pack src/CsvToolkit.Core/CsvToolkit.Core.csproj \
             -c Release \
             --no-restore \
             -p:PackageVersion=${{ steps.version.outputs.version }} \
