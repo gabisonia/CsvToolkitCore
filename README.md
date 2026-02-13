@@ -128,9 +128,12 @@ Benchmarks compare `CsvToolkit.Core` with `CsvHelper` for:
 - Typed write
 - Semicolon + high quoting parse
 
-Performance design notes:
+### Technical Docs
 
-- [Performance Design Decisions](docs/performance-design-decisions.md)
+If you want deeper implementation details and rationale, start here:
+
+- [Technical Architecture](docs/technical-architecture.md): components, data flow, and technologies used.
+- [Performance Design Decisions](docs/performance-design-decisions.md): why hot paths are fast and the tradeoffs behind each optimization.
 
 Run all benchmarks non-interactively:
 
