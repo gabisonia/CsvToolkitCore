@@ -164,22 +164,32 @@ Benchmark dataset generation is deterministic (`Random` seed-based) inside bench
 
 ### Latest Results
 
-Run date: `2026-02-10`  
+Run date: `2026-03-03`  
 Machine: `Apple M3 Pro`  
 Runtime: `.NET 10.0.0`  
 Command: `dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks*"`
 
-| Method                                  | RowCount | Mean     | Error    | StdDev   | Ratio | Gen0      | Gen1     | Gen2     | Allocated | Alloc Ratio |
-|---------------------------------------- |--------- |---------:|---------:|---------:|------:|----------:|---------:|---------:|----------:|------------:|
-| CsvToolkitCore_WriteTyped_Stream        | 100000   | 20.76 ms | 0.110 ms | 0.098 ms |  0.42 | 1593.7500 | 406.2500 | 343.7500 |  25.97 MB |        1.35 |
-| CsvHelper_WriteTyped_Stream             | 100000   | 24.16 ms | 0.135 ms | 0.120 ms |  0.48 | 3281.2500 | 656.2500 | 343.7500 |   39.4 MB |        2.05 |
-| CsvToolkitCore_ReadDictionary_Stream    | 100000   | 26.78 ms | 0.060 ms | 0.050 ms |  0.54 | 6593.7500 |        - |        - |  52.64 MB |        2.74 |
-| CsvHelper_ReadDynamic_Stream            | 100000   | 43.98 ms | 0.238 ms | 0.186 ms |  0.88 | 9916.6667 | 250.0000 |        - |  79.41 MB |        4.14 |
-| CsvHelper_ReadTyped_Stream              | 100000   | 45.86 ms | 0.318 ms | 0.298 ms |  0.92 | 4545.4545 | 181.8182 |        - |  36.72 MB |        1.91 |
-| CsvToolkitCore_ReadTyped_SemicolonHighQuote | 100000   | 48.81 ms | 0.121 ms | 0.107 ms |  0.98 | 2400.0000 |        - |        - |   19.2 MB |        1.00 |
-| CsvHelper_ReadTyped_SemicolonHighQuote  | 100000   | 49.88 ms | 0.187 ms | 0.166 ms |  1.00 | 4545.4545 | 181.8182 |        - |  36.72 MB |        1.91 |
-| CsvToolkitCore_ReadTyped_Stream         | 100000   | 49.90 ms | 0.206 ms | 0.183 ms |  1.00 | 2400.0000 |        - |        - |   19.2 MB |        1.00 |
+| Method                                      | RowCount | Mean     | Error    | StdDev   | Ratio | Gen0      | Gen1     | Gen2     | Allocated | Alloc Ratio |
+|-------------------------------------------- |--------- |---------:|---------:|---------:|------:|----------:|---------:|---------:|----------:|------------:|
+| CsvToolkitCore_WriteTyped_Stream            | 100000   | 22.52 ms | 0.403 ms | 0.377 ms |  0.46 | 3250.0000 | 406.2500 | 375.0000 |  38.86 MB |        2.02 |
+| CsvHelper_WriteTyped_Stream                 | 100000   | 23.99 ms | 0.169 ms | 0.150 ms |  0.48 | 3281.2500 | 656.2500 | 343.7500 |  39.41 MB |        2.05 |
+| CsvToolkitCore_ReadDictionary_Stream        | 100000   | 25.91 ms | 0.098 ms | 0.076 ms |  0.52 | 6593.7500 |        - |        - |  52.64 MB |        2.74 |
+| CsvHelper_ReadDynamic_Stream                | 100000   | 42.88 ms | 0.164 ms | 0.153 ms |  0.87 | 9916.6667 | 250.0000 |        - |  79.41 MB |        4.14 |
+| CsvHelper_ReadTyped_Stream                  | 100000   | 45.54 ms | 0.367 ms | 0.325 ms |  0.92 | 4545.4545 | 181.8182 |        - |  36.72 MB |        1.91 |
+| CsvToolkitCore_ReadTyped_SemicolonHighQuote | 100000   | 47.70 ms | 0.679 ms | 0.635 ms |  0.96 | 2363.6364 |        - |        - |   19.2 MB |        1.00 |
+| CsvHelper_ReadTyped_SemicolonHighQuote      | 100000   | 49.05 ms | 0.135 ms | 0.120 ms |  0.99 | 4600.0000 | 200.0000 |        - |  36.72 MB |        1.91 |
+| CsvToolkitCore_ReadTyped_Stream             | 100000   | 49.49 ms | 0.422 ms | 0.395 ms |  1.00 | 2363.6364 |        - |        - |   19.2 MB |        1.00 |
+
+Outlier hints:
+- `CsvHelper_WriteTyped_Stream`: 1 outlier removed (`25.78 ms`)
+- `CsvToolkitCore_ReadDictionary_Stream`: 3 outliers removed (`26.21 ms..28.93 ms`)
+- `CsvHelper_ReadTyped_Stream`: 1 outlier removed (`46.74 ms`)
+- `CsvHelper_ReadTyped_SemicolonHighQuote`: 1 outlier removed (`50.79 ms`)
+
+Benchmark run time:
+- Benchmark execution: `00:02:29` (`149.52 sec`)
+- Global total: `00:02:33` (`153.73 sec`)
 
 Raw benchmark artifacts:
-- `BenchmarkDotNet.Artifacts/results/CsvToolkit.Benchmarks.CsvReadWriteBenchmarks-report-github.md`
-- `BenchmarkDotNet.Artifacts/results/CsvToolkit.Benchmarks.CsvReadWriteBenchmarks-report.csv`
+- `BenchmarkDotNet.Artifacts/results/CsvToolkit.Core.Benchmarks.CsvReadWriteBenchmarks-report-github.md`
+- `BenchmarkDotNet.Artifacts/results/CsvToolkit.Core.Benchmarks.CsvReadWriteBenchmarks-report.csv`

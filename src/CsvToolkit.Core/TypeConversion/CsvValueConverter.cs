@@ -1,11 +1,26 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Reflection;
 
 namespace CsvToolkit.Core.TypeConversion;
 
 internal static class CsvValueConverter
 {
     private static readonly ConcurrentDictionary<Type, BuiltInTypeInfo> BuiltInTypeInfoCache = new();
+    private static readonly Type? DateOnlyType = Type.GetType("System.DateOnly");
+    private static readonly MethodInfo? DateOnlyFromDateTimeMethod = DateOnlyType?.GetMethod(
+        "FromDateTime",
+        BindingFlags.Public | BindingFlags.Static,
+        null,
+        [typeof(DateTime)],
+        null);
+    private static readonly Type? TimeOnlyType = Type.GetType("System.TimeOnly");
+    private static readonly MethodInfo? TimeOnlyFromDateTimeMethod = TimeOnlyType?.GetMethod(
+        "FromDateTime",
+        BindingFlags.Public | BindingFlags.Static,
+        null,
+        [typeof(DateTime)],
+        null);
 
     public static bool TryConvert(
         ReadOnlySpan<char> source,
@@ -216,7 +231,7 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.DateOnly:
-                if (DateOnly.TryParse(source, culture, DateTimeStyles.None, out var dateOnlyValue))
+                if (TryConvertDateOnly(source, culture, out var dateOnlyValue))
                 {
                     value = dateOnlyValue;
                     return true;
@@ -224,7 +239,7 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.TimeOnly:
-                if (TimeOnly.TryParse(source, culture, DateTimeStyles.None, out var timeOnlyValue))
+                if (TryConvertTimeOnly(source, culture, out var timeOnlyValue))
                 {
                     value = timeOnlyValue;
                     return true;
@@ -240,7 +255,7 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Enum:
-                if (Enum.TryParse(typeInfo.EffectiveType, source, ignoreCase: true, out var enumValue))
+                if (Enum.TryParse(typeInfo.EffectiveType, source.ToString(), ignoreCase: true, out var enumValue))
                 {
                     value = enumValue;
                     return true;
@@ -368,12 +383,12 @@ internal static class CsvValueConverter
             return BuiltInTypeKind.DateTime;
         }
 
-        if (effectiveType == typeof(DateOnly))
+        if (DateOnlyType is not null && effectiveType == DateOnlyType)
         {
             return BuiltInTypeKind.DateOnly;
         }
 
-        if (effectiveType == typeof(TimeOnly))
+        if (TimeOnlyType is not null && effectiveType == TimeOnlyType)
         {
             return BuiltInTypeKind.TimeOnly;
         }
@@ -389,6 +404,42 @@ internal static class CsvValueConverter
         }
 
         return BuiltInTypeKind.Unsupported;
+    }
+
+    private static bool TryConvertDateOnly(ReadOnlySpan<char> source, CultureInfo culture, out object? value)
+    {
+        if (DateOnlyFromDateTimeMethod is null)
+        {
+            value = null;
+            return false;
+        }
+
+        if (!DateTime.TryParse(source, culture, DateTimeStyles.None, out var dateTimeValue))
+        {
+            value = null;
+            return false;
+        }
+
+        value = DateOnlyFromDateTimeMethod.Invoke(null, [dateTimeValue]);
+        return value is not null;
+    }
+
+    private static bool TryConvertTimeOnly(ReadOnlySpan<char> source, CultureInfo culture, out object? value)
+    {
+        if (TimeOnlyFromDateTimeMethod is null)
+        {
+            value = null;
+            return false;
+        }
+
+        if (!DateTime.TryParse(source, culture, DateTimeStyles.None, out var dateTimeValue))
+        {
+            value = null;
+            return false;
+        }
+
+        value = TimeOnlyFromDateTimeMethod.Invoke(null, [dateTimeValue]);
+        return value is not null;
     }
 
     private readonly record struct BuiltInTypeInfo(Type EffectiveType, bool AllowsNull, BuiltInTypeKind Kind);

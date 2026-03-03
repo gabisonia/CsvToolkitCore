@@ -8,13 +8,20 @@ public sealed class CsvConverterRegistry
 
     public void Register<T>(ICsvTypeConverter<T> converter)
     {
-        ArgumentNullException.ThrowIfNull(converter);
+        if (converter is null)
+        {
+            throw new ArgumentNullException(nameof(converter));
+        }
+
         _converters[typeof(T)] = new CsvTypeConverterAdapter<T>(converter);
     }
 
     internal bool TryGet(Type type, out IUntypedCsvTypeConverter converter)
     {
-        ArgumentNullException.ThrowIfNull(type);
+        if (type is null)
+        {
+            throw new ArgumentNullException(nameof(type));
+        }
 
         if (_converters.TryGetValue(type, out converter!))
         {

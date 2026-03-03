@@ -92,7 +92,7 @@ internal sealed class Utf8StreamInput(Stream stream, int byteBufferSize, bool le
             return stream.DisposeAsync();
         }
 
-        return ValueTask.CompletedTask;
+        return default;
     }
 
     private void EnsureBytes()

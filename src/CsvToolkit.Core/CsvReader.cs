@@ -23,7 +23,10 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
     public CsvReader(TextReader reader, CsvOptions? options = null, CsvMapRegistry? mapRegistry = null, bool leaveOpen = false)
     {
-        ArgumentNullException.ThrowIfNull(reader);
+        if (reader is null)
+        {
+            throw new ArgumentNullException(nameof(reader));
+        }
 
         Options = (options ?? CsvOptions.Default).Clone();
         Options.Validate();
@@ -33,7 +36,10 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
     public CsvReader(Stream stream, CsvOptions? options = null, CsvMapRegistry? mapRegistry = null, bool leaveOpen = false)
     {
-        ArgumentNullException.ThrowIfNull(stream);
+        if (stream is null)
+        {
+            throw new ArgumentNullException(nameof(stream));
+        }
 
         Options = (options ?? CsvOptions.Default).Clone();
         Options.Validate();

@@ -27,6 +27,6 @@ internal sealed class TextReaderInput(TextReader reader, bool leaveOpen) : ICsvC
             reader.Dispose();
         }
 
-        return ValueTask.CompletedTask;
+        return default;
     }
 }

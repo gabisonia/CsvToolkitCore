@@ -19,7 +19,8 @@ internal sealed class TextWriterOutput(TextWriter writer, bool leaveOpen) : ICsv
 
     public ValueTask FlushAsync(CancellationToken cancellationToken)
     {
-        return new ValueTask(writer.FlushAsync(cancellationToken));
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask(writer.FlushAsync());
     }
 
     public void Dispose()
@@ -37,6 +38,6 @@ internal sealed class TextWriterOutput(TextWriter writer, bool leaveOpen) : ICsv
             writer.Dispose();
         }
 
-        return ValueTask.CompletedTask;
+        return default;
     }
 }

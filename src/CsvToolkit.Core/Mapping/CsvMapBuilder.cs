@@ -10,7 +10,11 @@ public sealed class CsvMapBuilder<T>
 
     public CsvMemberMapBuilder<T, TProperty> Map<TProperty>(Expression<Func<T, TProperty>> selector)
     {
-        ArgumentNullException.ThrowIfNull(selector);
+        if (selector is null)
+        {
+            throw new ArgumentNullException(nameof(selector));
+        }
+
         var property = PropertyAccessor.FromExpression(selector);
 
         if (!_members.TryGetValue(property, out var config))

@@ -1,4 +1,3 @@
-using System.Buffers;
 using CsvToolkit.Core.Internal;
 using CsvToolkit.Core.Mapping;
 using CsvToolkit.Core.TypeConversion;
@@ -19,7 +18,10 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     public CsvWriter(TextWriter writer, CsvOptions? options = null, CsvMapRegistry? mapRegistry = null,
         bool leaveOpen = false)
     {
-        ArgumentNullException.ThrowIfNull(writer);
+        if (writer is null)
+        {
+            throw new ArgumentNullException(nameof(writer));
+        }
 
         Options = (options ?? CsvOptions.Default).Clone();
         Options.Validate();
@@ -30,7 +32,10 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     public CsvWriter(Stream stream, CsvOptions? options = null, CsvMapRegistry? mapRegistry = null,
         bool leaveOpen = false)
     {
-        ArgumentNullException.ThrowIfNull(stream);
+        if (stream is null)
+        {
+            throw new ArgumentNullException(nameof(stream));
+        }
 
         Options = (options ?? CsvOptions.Default).Clone();
         Options.Validate();
@@ -122,37 +127,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return;
         }
 
-        if (value is ISpanFormattable formattable)
+        if (value is IFormattable formattable)
         {
-            // Fast path: format directly into stack/pooled buffers to avoid intermediate strings.
-            Span<char> stack = stackalloc char[128];
-            if (formattable.TryFormat(stack, out var written, default, Options.CultureInfo))
-            {
-                WriteField(stack[..written]);
-                return;
-            }
-
-            var pooled = ArrayPool<char>.Shared.Rent(1024);
-            try
-            {
-                var success = false;
-                while (!success)
-                {
-                    success = formattable.TryFormat(pooled, out written, default, Options.CultureInfo);
-                    if (!success)
-                    {
-                        ArrayPool<char>.Shared.Return(pooled);
-                        pooled = ArrayPool<char>.Shared.Rent(pooled.Length * 2);
-                    }
-                }
-
-                WriteField(pooled.AsSpan(0, written));
-                return;
-            }
-            finally
-            {
-                ArrayPool<char>.Shared.Return(pooled);
-            }
+            var formattedValue = formattable.ToString(null, Options.CultureInfo) ?? string.Empty;
+            WriteField(formattedValue.AsSpan());
+            return;
         }
 
         var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, null);
@@ -182,38 +161,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return;
         }
 
-        if (value is ISpanFormattable formattable)
+        if (value is IFormattable formattable)
         {
-            Span<char> stack = stackalloc char[128];
-            if (formattable.TryFormat(stack, out var written, default, Options.CultureInfo))
-            {
-                var stackFormatted = new string(stack[..written]);
-                await WriteFieldCoreAsync(stackFormatted.AsMemory(), cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            var pooled = ArrayPool<char>.Shared.Rent(1024);
-            try
-            {
-                var success = false;
-                while (!success)
-                {
-                    success = formattable.TryFormat(pooled, out written, default, Options.CultureInfo);
-                    if (!success)
-                    {
-                        ArrayPool<char>.Shared.Return(pooled);
-                        pooled = ArrayPool<char>.Shared.Rent(pooled.Length * 2);
-                    }
-                }
-
-                var pooledFormatted = new string(pooled, 0, written);
-                await WriteFieldCoreAsync(pooledFormatted.AsMemory(), cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            finally
-            {
-                ArrayPool<char>.Shared.Return(pooled);
-            }
+            var formattedValue = formattable.ToString(null, Options.CultureInfo) ?? string.Empty;
+            await WriteFieldCoreAsync(formattedValue.AsMemory(), cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, null);
@@ -353,7 +305,7 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     {
         if (_firstField)
         {
-            return ValueTask.CompletedTask;
+            return default;
         }
 
         _charScratch[0] = Options.Delimiter;

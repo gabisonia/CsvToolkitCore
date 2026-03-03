@@ -11,7 +11,10 @@ public sealed class CsvMapRegistry
 
     public void Register<T>(Action<CsvMapBuilder<T>> configure)
     {
-        ArgumentNullException.ThrowIfNull(configure);
+        if (configure is null)
+        {
+            throw new ArgumentNullException(nameof(configure));
+        }
 
         var builder = new CsvMapBuilder<T>();
         configure(builder);
