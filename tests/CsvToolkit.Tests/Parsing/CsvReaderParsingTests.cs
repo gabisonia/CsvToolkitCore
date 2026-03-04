@@ -66,6 +66,47 @@ public sealed class CsvReaderParsingTests
         Assert.Equal("Ada", row.GetFieldString(1));
     }
 
+    [Fact]
+    public void TryReadRow_SupportsMultiCharacterDelimiter()
+    {
+        // Arrange
+        const string csv = "id||name||age\n1||Ada||36\n";
+        var options = new CsvOptions { DelimiterString = "||" };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.TryReadRow(out var row);
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("1", row.GetFieldString(0));
+        Assert.Equal("Ada", row.GetFieldString(1));
+        Assert.Equal("36", row.GetFieldString(2));
+    }
+
+    [Fact]
+    public void TryReadRow_DetectsDelimiterFromCandidates()
+    {
+        // Arrange
+        const string csv = "id;name;age\n1;Ada;36\n";
+        var options = new CsvOptions
+        {
+            Delimiter = ',',
+            DetectDelimiter = true,
+            DelimiterCandidates = [",", ";", "\t"]
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var name = reader.GetField(1);
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("Ada", name);
+        Assert.Equal(";", reader.DetectedDelimiter);
+    }
+
     [Theory]
     [InlineData(';', "id;name\n1;Ada\n")]
     [InlineData('|', "id|name\n1|Ada\n")]

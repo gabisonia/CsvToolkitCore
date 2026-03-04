@@ -8,9 +8,30 @@ namespace CsvToolkit.Core;
 /// </summary>
 public sealed class CsvOptions
 {
+    private string _delimiter = ",";
+    private string[] _delimiterCandidates = [",", ";", "\t", "|"];
+
     public static CsvOptions Default { get; } = new();
 
-    public char Delimiter { get; set; } = ',';
+    public char Delimiter
+    {
+        get => _delimiter.Length == 0 ? ',' : _delimiter[0];
+        set => _delimiter = value.ToString();
+    }
+
+    public string DelimiterString
+    {
+        get => _delimiter;
+        set => _delimiter = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
+    public bool DetectDelimiter { get; set; }
+
+    public string[] DelimiterCandidates
+    {
+        get => _delimiterCandidates;
+        set => _delimiterCandidates = value ?? throw new ArgumentNullException(nameof(value));
+    }
 
     public bool HasHeader { get; set; } = true;
 
@@ -59,6 +80,9 @@ public sealed class CsvOptions
         var clone = new CsvOptions
         {
             Delimiter = Delimiter,
+            DelimiterString = DelimiterString,
+            DetectDelimiter = DetectDelimiter,
+            DelimiterCandidates = DelimiterCandidates.ToArray(),
             HasHeader = HasHeader,
             Quote = Quote,
             Escape = Escape,
@@ -92,9 +116,14 @@ public sealed class CsvOptions
 
     internal void Validate()
     {
-        if (Delimiter == '\0')
+        if (DelimiterString.Length == 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(Delimiter), "Delimiter cannot be null.");
+            throw new ArgumentOutOfRangeException(nameof(DelimiterString), "Delimiter cannot be empty.");
+        }
+
+        if (DelimiterString.IndexOf('\0') >= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(DelimiterString), "Delimiter cannot contain null.");
         }
 
         if (Quote == '\0')
@@ -131,6 +160,22 @@ public sealed class CsvOptions
         if (InjectionCharacters is null)
         {
             throw new ArgumentNullException(nameof(InjectionCharacters));
+        }
+
+        if (DelimiterCandidates.Length == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(DelimiterCandidates),
+                "Delimiter candidates must contain at least one item.");
+        }
+
+        for (var i = 0; i < DelimiterCandidates.Length; i++)
+        {
+            var candidate = DelimiterCandidates[i];
+            if (string.IsNullOrEmpty(candidate))
+            {
+                throw new ArgumentOutOfRangeException(nameof(DelimiterCandidates),
+                    "Delimiter candidates cannot contain null or empty values.");
+            }
         }
     }
 }

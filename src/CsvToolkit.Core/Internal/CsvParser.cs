@@ -7,9 +7,12 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 {
     private readonly CsvRowBuffer _rowBuffer = new(options.CharBufferSize);
     private readonly char[] _readBuffer = ArrayPool<char>.Shared.Rent(options.CharBufferSize);
+    private int[] _pushbackBuffer = new int[8];
+    private int _pushbackCount;
+    private string _activeDelimiter = options.DelimiterString;
+    private bool _delimiterResolved = !options.DetectDelimiter;
     private int _readPosition;
     private int _readLength;
-    private int _pushback = -1;
 
     public CsvRow CurrentRow { get; private set; }
 
@@ -18,6 +21,8 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
     private long LineNumber { get; set; } = 1;
 
     public string? DetectedNewLine { get; private set; }
+
+    public string? DetectedDelimiter { get; private set; }
 
     public bool TryReadRow(out CsvRow row)
     {
@@ -47,9 +52,12 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
     private bool TryReadRowCore()
     {
+        EnsureDelimiterResolved();
         _rowBuffer.Reset();
 
-        var delimiter = options.Delimiter;
+        var delimiter = _activeDelimiter;
+        var delimiterFirst = delimiter[0];
+        var delimiterLength = delimiter.Length;
         var quote = options.Quote;
         var escape = options.Escape;
         var trimOptions = options.TrimOptions;
@@ -149,7 +157,7 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
             if (afterClosingQuote)
             {
-                if (ch == delimiter)
+                if (TryConsumeDelimiter(ch, delimiter, delimiterFirst, delimiterLength))
                 {
                     _rowBuffer.CompleteField(true, trimOptions);
                     fieldWasQuoted = false;
@@ -188,7 +196,7 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
                 continue;
             }
 
-            if (ch == delimiter)
+            if (TryConsumeDelimiter(ch, delimiter, delimiterFirst, delimiterLength))
             {
                 _rowBuffer.CompleteField(fieldWasQuoted, trimOptions);
                 fieldWasQuoted = false;
@@ -240,9 +248,12 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
     private async ValueTask<bool> TryReadRowCoreAsync(CancellationToken cancellationToken)
     {
+        await EnsureDelimiterResolvedAsync(cancellationToken).ConfigureAwait(false);
         _rowBuffer.Reset();
 
-        var delimiter = options.Delimiter;
+        var delimiter = _activeDelimiter;
+        var delimiterFirst = delimiter[0];
+        var delimiterLength = delimiter.Length;
         var quote = options.Quote;
         var escape = options.Escape;
         var trimOptions = options.TrimOptions;
@@ -342,7 +353,8 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
             if (afterClosingQuote)
             {
-                if (ch == delimiter)
+                if (await TryConsumeDelimiterAsync(ch, delimiter, delimiterFirst, delimiterLength, cancellationToken)
+                        .ConfigureAwait(false))
                 {
                     _rowBuffer.CompleteField(true, trimOptions);
                     fieldWasQuoted = false;
@@ -381,7 +393,8 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
                 continue;
             }
 
-            if (ch == delimiter)
+            if (await TryConsumeDelimiterAsync(ch, delimiter, delimiterFirst, delimiterLength, cancellationToken)
+                    .ConfigureAwait(false))
             {
                 _rowBuffer.CompleteField(fieldWasQuoted, trimOptions);
                 fieldWasQuoted = false;
@@ -429,6 +442,292 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
             _rowBuffer.Append(ch);
         }
+    }
+
+    private void EnsureDelimiterResolved()
+    {
+        if (!options.DetectDelimiter)
+        {
+            _activeDelimiter = options.DelimiterString;
+            _delimiterResolved = true;
+            return;
+        }
+
+        if (_delimiterResolved)
+        {
+            return;
+        }
+
+        var sample = ReadDelimiterSample();
+        _activeDelimiter = DetectDelimiter(sample, options.DelimiterCandidates, options.Quote, options.Escape) ??
+                           options.DelimiterString;
+        DetectedDelimiter = _activeDelimiter;
+        PushBackSample(sample);
+        _delimiterResolved = true;
+    }
+
+    private async ValueTask EnsureDelimiterResolvedAsync(CancellationToken cancellationToken)
+    {
+        if (!options.DetectDelimiter)
+        {
+            _activeDelimiter = options.DelimiterString;
+            _delimiterResolved = true;
+            return;
+        }
+
+        if (_delimiterResolved)
+        {
+            return;
+        }
+
+        var sample = await ReadDelimiterSampleAsync(cancellationToken).ConfigureAwait(false);
+        _activeDelimiter = DetectDelimiter(sample, options.DelimiterCandidates, options.Quote, options.Escape) ??
+                           options.DelimiterString;
+        DetectedDelimiter = _activeDelimiter;
+        PushBackSample(sample);
+        _delimiterResolved = true;
+    }
+
+    private List<int> ReadDelimiterSample()
+    {
+        var sample = new List<int>(64);
+        while (true)
+        {
+            var code = ReadChar();
+            if (code < 0)
+            {
+                break;
+            }
+
+            sample.Add(code);
+            if (code == '\n' || code == '\r')
+            {
+                break;
+            }
+        }
+
+        return sample;
+    }
+
+    private async ValueTask<List<int>> ReadDelimiterSampleAsync(CancellationToken cancellationToken)
+    {
+        var sample = new List<int>(64);
+        while (true)
+        {
+            var code = await ReadCharAsync(cancellationToken).ConfigureAwait(false);
+            if (code < 0)
+            {
+                break;
+            }
+
+            sample.Add(code);
+            if (code == '\n' || code == '\r')
+            {
+                break;
+            }
+        }
+
+        return sample;
+    }
+
+    private void PushBackSample(List<int> sample)
+    {
+        for (var i = sample.Count - 1; i >= 0; i--)
+        {
+            PushBack(sample[i]);
+        }
+    }
+
+    private static string? DetectDelimiter(
+        IReadOnlyList<int> sample,
+        IReadOnlyList<string> candidates,
+        char quote,
+        char escape)
+    {
+        string? best = null;
+        var bestCount = 0;
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var candidate = candidates[i];
+            var count = CountDelimiterOccurrences(sample, candidate, quote, escape);
+            if (count > bestCount)
+            {
+                best = candidate;
+                bestCount = count;
+            }
+        }
+
+        return bestCount > 0 ? best : null;
+    }
+
+    private static int CountDelimiterOccurrences(
+        IReadOnlyList<int> sample,
+        string delimiter,
+        char quote,
+        char escape)
+    {
+        var count = 0;
+        var inQuotes = false;
+
+        for (var i = 0; i < sample.Count; i++)
+        {
+            var ch = (char)sample[i];
+
+            if (ch == '\r' || ch == '\n')
+            {
+                break;
+            }
+
+            if (ch == quote)
+            {
+                if (inQuotes)
+                {
+                    if (quote == escape && i + 1 < sample.Count && (char)sample[i + 1] == quote)
+                    {
+                        i++;
+                        continue;
+                    }
+
+                    inQuotes = false;
+                    continue;
+                }
+
+                inQuotes = true;
+                continue;
+            }
+
+            if (inQuotes)
+            {
+                if (escape != quote && ch == escape && i + 1 < sample.Count && (char)sample[i + 1] == quote)
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (MatchesDelimiterAt(sample, i, delimiter))
+            {
+                count++;
+                i += delimiter.Length - 1;
+            }
+        }
+
+        return count;
+    }
+
+    private static bool MatchesDelimiterAt(IReadOnlyList<int> source, int start, string delimiter)
+    {
+        if (start + delimiter.Length > source.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < delimiter.Length; i++)
+        {
+            if ((char)source[start + i] != delimiter[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool TryConsumeDelimiter(char current, string delimiter, char delimiterFirst, int delimiterLength)
+    {
+        if (current != delimiterFirst)
+        {
+            return false;
+        }
+
+        if (delimiterLength == 1)
+        {
+            return true;
+        }
+
+        var consumed = new int[delimiterLength - 1];
+        var consumedCount = 0;
+
+        for (var i = 1; i < delimiterLength; i++)
+        {
+            var code = ReadChar();
+            if (code < 0)
+            {
+                for (var j = consumedCount - 1; j >= 0; j--)
+                {
+                    PushBack(consumed[j]);
+                }
+
+                return false;
+            }
+
+            consumed[consumedCount++] = code;
+            if ((char)code == delimiter[i])
+            {
+                continue;
+            }
+
+            for (var j = consumedCount - 1; j >= 0; j--)
+            {
+                PushBack(consumed[j]);
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private async ValueTask<bool> TryConsumeDelimiterAsync(
+        char current,
+        string delimiter,
+        char delimiterFirst,
+        int delimiterLength,
+        CancellationToken cancellationToken)
+    {
+        if (current != delimiterFirst)
+        {
+            return false;
+        }
+
+        if (delimiterLength == 1)
+        {
+            return true;
+        }
+
+        var consumed = new int[delimiterLength - 1];
+        var consumedCount = 0;
+
+        for (var i = 1; i < delimiterLength; i++)
+        {
+            var code = await ReadCharAsync(cancellationToken).ConfigureAwait(false);
+            if (code < 0)
+            {
+                for (var j = consumedCount - 1; j >= 0; j--)
+                {
+                    PushBack(consumed[j]);
+                }
+
+                return false;
+            }
+
+            consumed[consumedCount++] = code;
+            if ((char)code == delimiter[i])
+            {
+                continue;
+            }
+
+            for (var j = consumedCount - 1; j >= 0; j--)
+            {
+                PushBack(consumed[j]);
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private void ResetRowState(
@@ -580,17 +879,25 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PushBack(int value)
     {
-        _pushback = value;
+        if (value < 0)
+        {
+            return;
+        }
+
+        if (_pushbackCount == _pushbackBuffer.Length)
+        {
+            Array.Resize(ref _pushbackBuffer, _pushbackBuffer.Length * 2);
+        }
+
+        _pushbackBuffer[_pushbackCount++] = value;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int ReadChar()
     {
-        if (_pushback >= 0)
+        if (_pushbackCount > 0)
         {
-            var pushed = _pushback;
-            _pushback = -1;
-            return pushed;
+            return _pushbackBuffer[--_pushbackCount];
         }
 
         if (_readPosition >= _readLength)
@@ -608,11 +915,9 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
     private async ValueTask<int> ReadCharAsync(CancellationToken cancellationToken)
     {
-        if (_pushback >= 0)
+        if (_pushbackCount > 0)
         {
-            var pushed = _pushback;
-            _pushback = -1;
-            return pushed;
+            return _pushbackBuffer[--_pushbackCount];
         }
 
         if (_readPosition >= _readLength)

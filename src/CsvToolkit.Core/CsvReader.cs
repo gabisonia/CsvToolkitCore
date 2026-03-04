@@ -2,6 +2,7 @@ using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Dynamic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using CsvToolkit.Core.Internal;
 using CsvToolkit.Core.Mapping;
 using CsvToolkit.Core.TypeConversion;
@@ -61,6 +62,8 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
     public string? DetectedNewLine => _parser.DetectedNewLine;
 
+    public string? DetectedDelimiter => _parser.DetectedDelimiter;
+
     public int FieldCount => CurrentRow.FieldCount;
 
     public IReadOnlyList<string> Headers => _headers ?? [];
@@ -105,6 +108,31 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     public ReadOnlyMemory<char> GetFieldMemory(int index) => CurrentRow.GetFieldMemory(index);
 
     public string GetField(int index) => CurrentRow.GetFieldString(index);
+
+    public string GetField(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetField(index);
+    }
+
+    public TField? GetField<TField>(int index)
+    {
+        var valueMemory = GetFieldMemory(index);
+        var context = new CsvConverterContext(Options.CultureInfo, CurrentRow.RowIndex, index, null);
+        if (CsvValueConverter.TryConvert(valueMemory.Span, typeof(TField), Options, null, context, out var converted))
+        {
+            return (TField?)converted;
+        }
+
+        HandleBadData(index, $"Failed to convert field at index {index}.", valueMemory);
+        return default;
+    }
+
+    public TField? GetField<TField>(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetField<TField>(index);
+    }
 
     public bool TryReadDictionary([NotNullWhen(true)] out Dictionary<string, string?>? row)
     {
@@ -222,6 +250,33 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     public Dictionary<string, string?> GetCurrentRowDictionary()
     {
         return BuildDictionary(CurrentRow);
+    }
+
+    public IEnumerable<T> GetRecords<T>()
+    {
+        while (TryReadRecord<T>(out var record))
+        {
+            if (record is null)
+            {
+                continue;
+            }
+
+            yield return record;
+        }
+    }
+
+    public async IAsyncEnumerable<T> GetRecordsAsync<T>(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        while (await ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            yield return GetRecord<T>();
+        }
+    }
+
+    public CsvDataReader AsDataReader(bool leaveOpen = false)
+    {
+        return new CsvDataReader(this, leaveOpen);
     }
 
     public void Dispose()
@@ -785,6 +840,35 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
         Options.BadDataFound?.Invoke(new CsvBadDataContext(CurrentRow.RowIndex, CurrentRow.LineNumber, fieldIndex,
             message, rawField));
+    }
+
+    private int ResolveHeaderIndex(string name, int nameIndex)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Field name cannot be null or whitespace.", nameof(name));
+        }
+
+        EnsureHeaderInitialized();
+
+        if (_headerLookup is null)
+        {
+            throw new InvalidOperationException("Cannot access field by name when header is disabled or not available.");
+        }
+
+        var prepared = PrepareHeaderForMatch(name, -1);
+        if (!_headerLookup.TryGetValue(prepared, out var indices))
+        {
+            throw new KeyNotFoundException($"Header '{name}' was not found.");
+        }
+
+        if (nameIndex < 0 || nameIndex >= indices.Length)
+        {
+            throw new IndexOutOfRangeException(
+                $"Header '{name}' does not have index {nameIndex}. Available count: {indices.Length}.");
+        }
+
+        return indices[nameIndex];
     }
 
     private sealed class CsvConstructorBinding(

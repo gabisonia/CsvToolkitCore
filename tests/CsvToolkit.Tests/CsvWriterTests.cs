@@ -162,6 +162,50 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void WriteField_WithMultiCharacterDelimiter_WritesDelimiterSequence()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            DelimiterString = "||",
+            NewLine = "\n"
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("Ada");
+        writer.WriteField("Math");
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("Ada||Math\n", result);
+    }
+
+    [Fact]
+    public void WriteField_WithMultiCharacterDelimiter_QuotesWhenSequenceAppearsInField()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            DelimiterString = "||",
+            NewLine = "\n"
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("Ada||Lovelace");
+        writer.WriteField("Math");
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("\"Ada||Lovelace\"||Math\n", result);
+    }
+
+    [Fact]
     public void WriteHeaderAndRecord_WritesPoco()
     {
         // Arrange
@@ -316,6 +360,64 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void WriteRecords_WritesHeaderAndRecords()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        var records = new[]
+        {
+            new WriteRecord { Id = 1, Name = "Ada", Notes = "N1" },
+            new WriteRecord { Id = 2, Name = "Bob", Notes = "N2" }
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteRecords(records, writeHeader: true);
+        var csv = text.ToString();
+
+        // Assert
+        Assert.Equal("Id,Name,Notes\n1,Ada,N1\n2,Bob,N2\n", csv);
+    }
+
+    [Fact]
+    public async Task WriteRecordsAsync_Enumerable_WritesRecords()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        var records = new[]
+        {
+            new WriteRecord { Id = 1, Name = "Ada", Notes = "N1" },
+            new WriteRecord { Id = 2, Name = "Bob", Notes = "N2" }
+        };
+        using var text = new StringWriter();
+        await using var writer = new CsvWriter(text, options);
+
+        // Act
+        await writer.WriteRecordsAsync(records, writeHeader: true);
+        var csv = text.ToString();
+
+        // Assert
+        Assert.Equal("Id,Name,Notes\n1,Ada,N1\n2,Bob,N2\n", csv);
+    }
+
+    [Fact]
+    public async Task WriteRecordsAsync_AsyncEnumerable_WritesRecords()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        using var text = new StringWriter();
+        await using var writer = new CsvWriter(text, options);
+
+        // Act
+        await writer.WriteRecordsAsync(GetAsyncRecords(), writeHeader: true);
+        var csv = text.ToString();
+
+        // Assert
+        Assert.Equal("Id,Name,Notes\n1,Ada,N1\n2,Bob,N2\n", csv);
+    }
+
+    [Fact]
     public void WriteRecord_Null_ThrowsArgumentNullException()
     {
         // Arrange
@@ -350,5 +452,12 @@ public sealed class CsvWriterTests
         public string Name { get; set; } = string.Empty;
 
         public string Notes { get; set; } = string.Empty;
+    }
+
+    private static async IAsyncEnumerable<WriteRecord> GetAsyncRecords()
+    {
+        yield return new WriteRecord { Id = 1, Name = "Ada", Notes = "N1" };
+        await Task.Yield();
+        yield return new WriteRecord { Id = 2, Name = "Bob", Notes = "N2" };
     }
 }

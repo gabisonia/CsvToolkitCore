@@ -297,6 +297,72 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         await NextRecordAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public void WriteRecords<T>(IEnumerable<T> records, bool writeHeader = false)
+    {
+        if (records is null)
+        {
+            throw new ArgumentNullException(nameof(records));
+        }
+
+        if (writeHeader)
+        {
+            WriteHeader<T>();
+        }
+
+        foreach (var record in records)
+        {
+            WriteRecord(record!);
+        }
+    }
+
+    public async ValueTask WriteRecordsAsync<T>(
+        IEnumerable<T> records,
+        bool writeHeader = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (records is null)
+        {
+            throw new ArgumentNullException(nameof(records));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (writeHeader)
+        {
+            await WriteHeaderAsync<T>(cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var record in records)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await WriteRecordAsync(record!, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask WriteRecordsAsync<T>(
+        IAsyncEnumerable<T> records,
+        bool writeHeader = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (records is null)
+        {
+            throw new ArgumentNullException(nameof(records));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (writeHeader)
+        {
+            await WriteHeaderAsync<T>(cancellationToken).ConfigureAwait(false);
+        }
+
+        await foreach (var record in records.ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await WriteRecordAsync(record!, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public void Flush()
     {
         _output.Flush();
@@ -324,8 +390,15 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return;
         }
 
-        _charScratch[0] = Options.Delimiter;
-        _output.Write(_charScratch.AsSpan(0, 1));
+        var delimiter = Options.DelimiterString;
+        if (delimiter.Length == 1)
+        {
+            _charScratch[0] = delimiter[0];
+            _output.Write(_charScratch.AsSpan(0, 1));
+            return;
+        }
+
+        _output.Write(delimiter.AsSpan());
     }
 
     private ValueTask WriteDelimiterIfNeededAsync(CancellationToken cancellationToken)
@@ -335,8 +408,14 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return default;
         }
 
-        _charScratch[0] = Options.Delimiter;
-        return _output.WriteAsync(_charScratch.AsMemory(0, 1), cancellationToken);
+        var delimiter = Options.DelimiterString;
+        if (delimiter.Length == 1)
+        {
+            _charScratch[0] = delimiter[0];
+            return _output.WriteAsync(_charScratch.AsMemory(0, 1), cancellationToken);
+        }
+
+        return _output.WriteAsync(delimiter.AsMemory(), cancellationToken);
     }
 
     private bool NeedsQuoting(ReadOnlySpan<char> value)
@@ -351,9 +430,44 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return true;
         }
 
+        if (ContainsDelimiter(value, Options.DelimiterString.AsSpan()))
+        {
+            return true;
+        }
+
         foreach (var ch in value)
         {
-            if (ch == Options.Delimiter || ch == Options.Quote || ch == '\r' || ch == '\n')
+            if (ch == Options.Quote || ch == '\r' || ch == '\n')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsDelimiter(ReadOnlySpan<char> source, ReadOnlySpan<char> delimiter)
+    {
+        if (delimiter.Length == 0 || source.Length < delimiter.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i <= source.Length - delimiter.Length; i++)
+        {
+            var matched = true;
+            for (var j = 0; j < delimiter.Length; j++)
+            {
+                if (source[i + j] == delimiter[j])
+                {
+                    continue;
+                }
+
+                matched = false;
+                break;
+            }
+
+            if (matched)
             {
                 return true;
             }
