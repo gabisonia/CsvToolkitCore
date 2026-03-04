@@ -11,6 +11,8 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 {
     private readonly ICsvCharOutput _output;
     private readonly CsvMapRegistry _mapRegistry;
+    private readonly Dictionary<Type, int[]> _writableMemberIndexCache = new();
+    private readonly Dictionary<Type, CsvValueConversionPlan[]> _memberFormattingPlanCache = new();
     private readonly char[] _charScratch = new char[2];
     private bool _firstField = true;
     private int _fieldIndex;
@@ -205,16 +207,16 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         }
 
         var map = _mapRegistry.GetOrCreate(typeof(T));
+        var writableMemberIndices = ResolveWritableMemberIndices(map);
+        var formattingPlans = ResolveMemberFormattingPlans(map);
         object boxed = record;
 
-        foreach (var member in map.Members)
+        for (var i = 0; i < writableMemberIndices.Length; i++)
         {
-            if (member.Ignore || member.Getter is null)
-            {
-                continue;
-            }
+            var memberIndex = writableMemberIndices[i];
+            var member = map.Members[memberIndex];
 
-            var value = member.HasConstant ? member.ConstantValue : member.Getter(boxed);
+            var value = member.HasConstant ? member.ConstantValue : member.Getter!(boxed);
             if (value is null && member.HasDefault)
             {
                 value = member.DefaultValue;
@@ -226,10 +228,12 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
                 throw new InvalidOperationException(message);
             }
 
-            var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name);
-            var formatted =
-                CsvValueConverter.FormatToString(value, member.PropertyType, Options, member.Converter,
-                    member.ConverterOptions, context);
+            var formatted = formattingPlans[memberIndex].UseBuiltInPath
+                ? CsvValueConverter.FormatToStringBuiltInPath(value, Options.CultureInfo)
+                : CsvValueConverter.FormatToString(
+                    value,
+                    formattingPlans[memberIndex],
+                    new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name));
             WriteField(formatted.AsSpan());
         }
 
@@ -246,16 +250,16 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
 
         var map = _mapRegistry.GetOrCreate(typeof(T));
+        var writableMemberIndices = ResolveWritableMemberIndices(map);
+        var formattingPlans = ResolveMemberFormattingPlans(map);
         object boxed = record;
 
-        foreach (var member in map.Members)
+        for (var i = 0; i < writableMemberIndices.Length; i++)
         {
-            if (member.Ignore || member.Getter is null)
-            {
-                continue;
-            }
+            var memberIndex = writableMemberIndices[i];
+            var member = map.Members[memberIndex];
 
-            var value = member.HasConstant ? member.ConstantValue : member.Getter(boxed);
+            var value = member.HasConstant ? member.ConstantValue : member.Getter!(boxed);
             if (value is null && member.HasDefault)
             {
                 value = member.DefaultValue;
@@ -267,10 +271,12 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
                 throw new InvalidOperationException(message);
             }
 
-            var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name);
-            var formatted =
-                CsvValueConverter.FormatToString(value, member.PropertyType, Options, member.Converter,
-                    member.ConverterOptions, context);
+            var formatted = formattingPlans[memberIndex].UseBuiltInPath
+                ? CsvValueConverter.FormatToStringBuiltInPath(value, Options.CultureInfo)
+                : CsvValueConverter.FormatToString(
+                    value,
+                    formattingPlans[memberIndex],
+                    new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name));
             await WriteFieldCoreAsync(formatted.AsMemory(), cancellationToken).ConfigureAwait(false);
         }
 
@@ -361,6 +367,57 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         return _output.DisposeAsync();
+    }
+
+    private CsvValueConversionPlan[] ResolveMemberFormattingPlans(CsvTypeMap map)
+    {
+        if (_memberFormattingPlanCache.TryGetValue(map.RecordType, out var cached))
+        {
+            return cached;
+        }
+
+        var plans = new CsvValueConversionPlan[map.Members.Length];
+        for (var i = 0; i < map.Members.Length; i++)
+        {
+            var member = map.Members[i];
+            if (member.Ignore)
+            {
+                continue;
+            }
+
+            plans[i] = CsvValueConverter.CreateConversionPlan(
+                member.PropertyType,
+                Options,
+                member.Converter,
+                member.ConverterOptions);
+        }
+
+        _memberFormattingPlanCache[map.RecordType] = plans;
+        return plans;
+    }
+
+    private int[] ResolveWritableMemberIndices(CsvTypeMap map)
+    {
+        if (_writableMemberIndexCache.TryGetValue(map.RecordType, out var cached))
+        {
+            return cached;
+        }
+
+        var members = new List<int>(map.Members.Length);
+        for (var i = 0; i < map.Members.Length; i++)
+        {
+            var member = map.Members[i];
+            if (member.Ignore || member.Getter is null)
+            {
+                continue;
+            }
+
+            members.Add(i);
+        }
+
+        var indices = members.ToArray();
+        _writableMemberIndexCache[map.RecordType] = indices;
+        return indices;
     }
 
     private void WriteDelimiterIfNeeded()

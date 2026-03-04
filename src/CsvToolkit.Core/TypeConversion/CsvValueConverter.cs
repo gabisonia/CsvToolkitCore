@@ -6,6 +6,7 @@ namespace CsvToolkit.Core.TypeConversion;
 
 internal static class CsvValueConverter
 {
+    private const string RoundtripDateTimeFormat = "O";
     private static readonly ConcurrentDictionary<Type, BuiltInTypeInfo> BuiltInTypeInfoCache = new();
     private static readonly Type? DateOnlyType = Type.GetType("System.DateOnly");
     private static readonly MethodInfo? DateOnlyFromDateTimeMethod = DateOnlyType?.GetMethod(
@@ -31,8 +32,23 @@ internal static class CsvValueConverter
         in CsvConverterContext context,
         out object? value)
     {
-        var typeInfo = GetBuiltInTypeInfo(targetType);
-        var converterOptions = ResolveConverterOptions(targetType, options, memberConverterOptions);
+        var plan = CreateConversionPlan(targetType, options, memberConverter, memberConverterOptions);
+        return TryConvert(source, plan, context, out value);
+    }
+
+    public static bool TryConvert(
+        ReadOnlySpan<char> source,
+        in CsvValueConversionPlan plan,
+        in CsvConverterContext context,
+        out object? value)
+    {
+        var typeInfo = GetBuiltInTypeInfo(plan.TargetType);
+        if (plan.UseBuiltInPath)
+        {
+            return TryConvertBuiltInPath(source, typeInfo, context.CultureInfo, out value);
+        }
+
+        var converterOptions = plan.ConverterOptions;
         var culture = converterOptions?.CultureInfo ?? context.CultureInfo;
         var converterContext = CreateContextWithCulture(context, culture);
 
@@ -42,14 +58,9 @@ internal static class CsvValueConverter
             return true;
         }
 
-        if (memberConverter is not null)
+        if (plan.Converter is not null)
         {
-            return memberConverter.TryParse(source, targetType, converterContext, out value);
-        }
-
-        if (options.Converters.TryGet(targetType, out var converter))
-        {
-            return converter.TryParse(source, targetType, converterContext, out value);
+            return plan.Converter.TryParse(source, plan.TargetType, converterContext, out value);
         }
 
         if (TryConvertBuiltIn(source, typeInfo, culture, converterOptions, out value))
@@ -66,6 +77,35 @@ internal static class CsvValueConverter
         return false;
     }
 
+    public static CsvValueConversionPlan CreateConversionPlan(
+        Type targetType,
+        CsvOptions options,
+        IUntypedCsvTypeConverter? memberConverter,
+        CsvTypeConverterOptions? memberConverterOptions)
+    {
+        var converterOptions = ResolveConverterOptions(targetType, options, memberConverterOptions);
+        var converter = ResolveConverter(targetType, options, memberConverter);
+        var useBuiltInPath = converter is null &&
+                             converterOptions is null &&
+                             CanUseBuiltInPathConversion(targetType);
+        return new CsvValueConversionPlan(targetType, converter, converterOptions, useBuiltInPath);
+    }
+
+    public static bool CanUseBuiltInPathConversion(Type targetType)
+    {
+        return GetBuiltInTypeInfo(targetType).Kind != BuiltInTypeKind.Unsupported;
+    }
+
+    public static bool TryConvertBuiltInPath(
+        ReadOnlySpan<char> source,
+        Type targetType,
+        CultureInfo culture,
+        out object? value)
+    {
+        var typeInfo = GetBuiltInTypeInfo(targetType);
+        return TryConvertBuiltInPath(source, typeInfo, culture, out value);
+    }
+
     public static string FormatToString(
         object? value,
         Type valueType,
@@ -74,7 +114,21 @@ internal static class CsvValueConverter
         CsvTypeConverterOptions? memberConverterOptions,
         in CsvConverterContext context)
     {
-        var converterOptions = ResolveConverterOptions(valueType, options, memberConverterOptions);
+        var plan = CreateConversionPlan(valueType, options, memberConverter, memberConverterOptions);
+        return FormatToString(value, plan, context);
+    }
+
+    public static string FormatToString(
+        object? value,
+        in CsvValueConversionPlan plan,
+        in CsvConverterContext context)
+    {
+        if (plan.UseBuiltInPath)
+        {
+            return FormatToStringBuiltInPath(value, context.CultureInfo);
+        }
+
+        var converterOptions = plan.ConverterOptions;
         var culture = converterOptions?.CultureInfo ?? context.CultureInfo;
         var converterContext = CreateContextWithCulture(context, culture);
 
@@ -88,14 +142,9 @@ internal static class CsvValueConverter
             return string.Empty;
         }
 
-        if (memberConverter is not null)
+        if (plan.Converter is not null)
         {
-            return memberConverter.Format(value, valueType, converterContext);
-        }
-
-        if (options.Converters.TryGet(valueType, out var converter))
-        {
-            return converter.Format(value, valueType, converterContext);
+            return plan.Converter.Format(value, plan.TargetType, converterContext);
         }
 
         if (TryFormatBuiltIn(value, culture, converterOptions, out var builtInFormatted))
@@ -110,6 +159,41 @@ internal static class CsvValueConverter
         }
 
         return value.ToString() ?? string.Empty;
+    }
+
+    public static string FormatToStringBuiltInPath(object? value, CultureInfo culture)
+    {
+        if (value is null)
+        {
+            return string.Empty;
+        }
+
+        if (TryFormatBuiltIn(value, culture, null, out var formatted))
+        {
+            return formatted;
+        }
+
+        return value.ToString() ?? string.Empty;
+    }
+
+    private static bool TryConvertBuiltInPath(
+        ReadOnlySpan<char> source,
+        in BuiltInTypeInfo typeInfo,
+        CultureInfo culture,
+        out object? value)
+    {
+        if (TryConvertBuiltIn(source, typeInfo, culture, null, out value))
+        {
+            return true;
+        }
+
+        if (TryConvertFallback(source, typeInfo, culture, null, out value))
+        {
+            return true;
+        }
+
+        value = null;
+        return false;
     }
 
     private static bool TryConvertBuiltIn(
@@ -523,6 +607,12 @@ internal static class CsvValueConverter
                 }
             }
         }
+        else if (ReferenceEquals(culture, CultureInfo.InvariantCulture) &&
+                 DateTime.TryParseExact(source, RoundtripDateTimeFormat, CultureInfo.InvariantCulture,
+                     DateTimeStyles.RoundtripKind, out value))
+        {
+            return true;
+        }
 
         var styles = converterOptions?.DateTimeStyles ?? DateTimeStyles.None;
         return DateTime.TryParse(source, culture, styles, out value);
@@ -551,6 +641,24 @@ internal static class CsvValueConverter
         if (options.ConverterOptions.TryGet(targetType, out var typeOptions))
         {
             return typeOptions;
+        }
+
+        return null;
+    }
+
+    private static IUntypedCsvTypeConverter? ResolveConverter(
+        Type targetType,
+        CsvOptions options,
+        IUntypedCsvTypeConverter? memberConverter)
+    {
+        if (memberConverter is not null)
+        {
+            return memberConverter;
+        }
+
+        if (options.Converters.TryGet(targetType, out var converter))
+        {
+            return converter;
         }
 
         return null;
@@ -627,3 +735,9 @@ internal static class CsvValueConverter
         Enum
     }
 }
+
+internal readonly record struct CsvValueConversionPlan(
+    Type TargetType,
+    IUntypedCsvTypeConverter? Converter,
+    CsvTypeConverterOptions? ConverterOptions,
+    bool UseBuiltInPath);

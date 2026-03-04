@@ -225,30 +225,31 @@ Top-line results (`RowCount = 100000`):
 
 | Method                                                    | Mean      | Allocated |
 |---------------------------------------------------------- |----------:|----------:|
-| CsvHelper_ReadTyped_DuplicateHeader_NameIndex_Stream      | 14.915 ms |  17.64 MB |
-| CsvHelper_WriteTyped_WithConverterOptions_Stream          | 20.558 ms |   26.6 MB |
-| CsvToolkitCore_ReadTyped_DuplicateHeader_NameIndex_Stream | 20.782 ms |   14.5 MB |
-| CsvHelper_WriteTyped_Stream                               | 24.595 ms |   39.4 MB |
-| CsvToolkitCore_ReadDictionary_Stream                      | 27.158 ms |  52.64 MB |
-| CsvToolkitCore_WriteTyped_Stream                          | 27.503 ms |  38.86 MB |
-| CsvToolkitCore_WriteTyped_WithConverterOptions_Stream     | 27.535 ms |  29.27 MB |
-| CsvHelper_ReadTyped_WithConverterOptions_Stream           | 27.923 ms |  25.81 MB |
-| CsvToolkitCore_ReadTyped_WithConverterOptions_Stream      | 39.036 ms |  15.54 MB |
-| CsvHelper_ReadDynamic_Stream                              | 45.534 ms |  79.41 MB |
-| CsvHelper_ReadTyped_Stream                                | 46.115 ms |  36.72 MB |
-| CsvHelper_ReadTyped_SemicolonHighQuote                    | 50.544 ms |  36.72 MB |
-| CsvToolkitCore_ReadTyped_SemicolonHighQuote               | 54.435 ms |   19.2 MB |
-| CsvToolkitCore_ReadTyped_Stream                           | 56.497 ms |   19.2 MB |
+| CsvToolkitCore_ReadTyped_DuplicateHeader_NameIndex_Stream | 13.088 ms |  12.23 MB |
+| CsvHelper_ReadTyped_DuplicateHeader_NameIndex_Stream      | 13.932 ms |  17.64 MB |
+| CsvHelper_WriteTyped_WithConverterOptions_Stream          | 19.087 ms |   26.6 MB |
+| CsvToolkitCore_WriteTyped_WithConverterOptions_Stream     | 19.295 ms |  26.52 MB |
+| CsvHelper_WriteTyped_Stream                               | 22.670 ms |   39.4 MB |
+| CsvToolkitCore_WriteTyped_Stream                          | 23.988 ms |  38.86 MB |
+| CsvToolkitCore_ReadTyped_WithConverterOptions_Stream      | 26.408 ms |   12.8 MB |
+| CsvToolkitCore_ReadDictionary_Stream                      | 27.228 ms |  52.64 MB |
+| CsvHelper_ReadTyped_WithConverterOptions_Stream           | 27.290 ms |  25.81 MB |
+| CsvToolkitCore_ReadTyped_SemicolonHighQuote               | 40.004 ms |    9.3 MB |
+| CsvToolkitCore_ReadTyped_Stream                           | 41.431 ms |    9.3 MB |
+| CsvHelper_ReadDynamic_Stream                              | 42.923 ms |  79.41 MB |
+| CsvHelper_ReadTyped_Stream                                | 45.086 ms |  36.72 MB |
+| CsvHelper_ReadTyped_SemicolonHighQuote                    | 48.538 ms |  36.72 MB |
 
 Observed trend from this run:
-- `CsvToolkit.Core` generally allocates less memory in typed read scenarios.
-- `CsvHelper` currently leads on typed throughput in most scenarios.
-- Converter-options and duplicate-header cases show the same tradeoff: lower allocation in `CsvToolkit.Core`, faster execution in `CsvHelper`.
+- `CsvToolkit.Core` now leads key typed read scenarios (default, semicolon/high-quote, duplicate headers, and typed read with converter options).
+- `CsvToolkit.Core` keeps a large allocation advantage in typed reads (around `~3-4x` lower allocation in direct typed read benchmarks).
+- `CsvHelper` remains slightly faster in write throughput (`WriteTyped` and `WriteTyped_WithConverterOptions`) while allocation is comparable.
 
 Benchmark run time:
-- Benchmark execution: `00:11:01` (`661.2 sec`)
-- Global total: `00:11:06` (`666.61 sec`)
+- Benchmark execution: `00:08:46` (`526.66 sec`)
+- Global total: `00:09:04` (`544.68 sec`)
 
-Raw benchmark artifacts:
-- `BenchmarkDotNet.Artifacts/results/CsvToolkit.Core.Benchmarks.CsvReadWriteBenchmarks-report-github.md`
-- `BenchmarkDotNet.Artifacts/results/CsvToolkit.Core.Benchmarks.CsvReadWriteBenchmarks-report.csv`
+Benchmark artifacts:
+- Tracked snapshot (Markdown): `docs/benchmarks/CsvReadWriteBenchmarks-2026-03-04.md`
+- Tracked snapshot (CSV): `docs/benchmarks/CsvReadWriteBenchmarks-2026-03-04.csv`
+- Generated local output (gitignored): `BenchmarkDotNet.Artifacts/results/`

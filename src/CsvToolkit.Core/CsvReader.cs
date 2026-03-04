@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Dynamic;
+using System.Globalization;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using CsvToolkit.Core.Internal;
@@ -17,6 +19,12 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     private readonly CsvParser _parser;
     private readonly CsvMapRegistry _mapRegistry;
     private readonly Dictionary<Type, int[]> _memberIndexCache = new();
+    private readonly Dictionary<Type, int[]> _assignableMemberIndexCache = new();
+    private readonly Dictionary<Type, CsvValueConversionPlan[]> _memberConversionPlanCache = new();
+    private readonly Dictionary<Type, CsvSimpleReadPlan?> _simpleReadPlanCache = new();
+    private readonly Dictionary<Type, CsvRecordReadContext> _recordReadContextCache = new();
+    private readonly Dictionary<Type, object> _compiledSimpleMaterializerCache = new();
+    private readonly Dictionary<Type, Func<object>> _defaultConstructorFactoryCache = new();
     private readonly Dictionary<Type, CsvConstructorBinding?> _constructorBindingCache = new();
     private bool _headerInitialized;
     private string[]? _headers;
@@ -200,48 +208,66 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
     public T GetRecord<T>()
     {
-        var type = typeof(T);
-        var map = _mapRegistry.GetOrCreate(type);
-        var indices = ResolveFieldIndices(map);
+        var context = ResolveRecordReadContext(typeof(T));
+        var map = context.Map;
+        var indices = context.Indices;
+        var assignableMemberIndices = context.AssignableMemberIndices;
+        var conversionPlans = context.ConversionPlans;
         var constructorBoundMembers = Array.Empty<bool>();
         object boxed;
 
-        var constructorBinding = GetConstructorBinding(map);
+        var constructorBinding = context.ConstructorBinding;
         if (constructorBinding is not null)
         {
-            boxed = CreateRecordUsingConstructor(map, constructorBinding, indices, out constructorBoundMembers);
+            boxed = CreateRecordUsingConstructor(map, constructorBinding, indices, conversionPlans,
+                out constructorBoundMembers);
         }
         else
         {
-            boxed = CreateRecordWithDefaultConstructor(type);
+            boxed = context.DefaultConstructorFactory!();
+            var simpleReadPlan = context.SimpleReadPlan;
+            if (simpleReadPlan is not null)
+            {
+                if (simpleReadPlan.IsBuiltInOnly)
+                {
+                    var materializer = ResolveCompiledSimpleMaterializer<T>(simpleReadPlan);
+                    if (materializer is not null && materializer(this, (T)boxed))
+                    {
+                        return (T)boxed;
+                    }
+                }
+
+                if (TryPopulateUsingSimpleReadPlan(simpleReadPlan, boxed))
+                {
+                    return (T)boxed;
+                }
+            }
         }
 
-        for (var i = 0; i < map.Members.Length; i++)
+        var hasConstructorBoundMembers = constructorBoundMembers.Length != 0;
+        for (var i = 0; i < assignableMemberIndices.Length; i++)
         {
-            var member = map.Members[i];
-            if (member.Ignore || member.Setter is null)
+            var memberIndex = assignableMemberIndices[i];
+            if (hasConstructorBoundMembers && constructorBoundMembers[memberIndex])
             {
                 continue;
             }
 
-            if (constructorBoundMembers.Length != 0 && constructorBoundMembers[i])
+            var member = map.Members[memberIndex];
+            var fieldIndex = indices[memberIndex];
+            if (!TryResolveMemberValue(member, fieldIndex, conversionPlans[memberIndex], out var converted,
+                    out var valueMemory))
             {
                 continue;
             }
 
-            var fieldIndex = indices[i];
-            if (!TryResolveMemberValue(member, fieldIndex, out var converted, out var valueMemory))
+            if (conversionPlans[memberIndex].UseBuiltInPath)
             {
-                continue;
+                member.Setter!(boxed, converted);
             }
-
-            try
+            else
             {
-                member.Setter(boxed, converted);
-            }
-            catch (Exception ex)
-            {
-                HandleBadData(fieldIndex, $"Failed to assign member '{member.Name}': {ex.Message}", valueMemory);
+                AssignMemberValue(member, boxed, converted, fieldIndex, valueMemory);
             }
         }
 
@@ -325,6 +351,9 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         _memberIndexCache.Clear();
+        _simpleReadPlanCache.Clear();
+        _recordReadContextCache.Clear();
+        _compiledSimpleMaterializerCache.Clear();
     }
 
     private async ValueTask EnsureHeaderInitializedAsync(CancellationToken cancellationToken)
@@ -363,6 +392,40 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         _memberIndexCache.Clear();
+        _simpleReadPlanCache.Clear();
+        _recordReadContextCache.Clear();
+        _compiledSimpleMaterializerCache.Clear();
+    }
+
+    private CsvRecordReadContext ResolveRecordReadContext(Type type)
+    {
+        if (_recordReadContextCache.TryGetValue(type, out var cached))
+        {
+            return cached;
+        }
+
+        var map = _mapRegistry.GetOrCreate(type);
+        var indices = ResolveFieldIndices(map);
+        var assignableMemberIndices = ResolveAssignableMemberIndices(map);
+        var conversionPlans = ResolveMemberConversionPlans(map);
+        var constructorBinding = GetConstructorBinding(map);
+        var simpleReadPlan = constructorBinding is null
+            ? ResolveSimpleReadPlan(map, indices, conversionPlans, assignableMemberIndices)
+            : null;
+        var defaultConstructorFactory = constructorBinding is null
+            ? ResolveDefaultConstructorFactory(type)
+            : null;
+
+        var context = new CsvRecordReadContext(
+            map,
+            indices,
+            assignableMemberIndices,
+            conversionPlans,
+            constructorBinding,
+            simpleReadPlan,
+            defaultConstructorFactory);
+        _recordReadContextCache[type] = context;
+        return context;
     }
 
     private Dictionary<string, int[]> BuildHeaderLookup(IReadOnlyList<string> headers)
@@ -516,9 +579,362 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         return indices;
     }
 
+    private CsvValueConversionPlan[] ResolveMemberConversionPlans(Mapping.CsvTypeMap map)
+    {
+        if (_memberConversionPlanCache.TryGetValue(map.RecordType, out var cached))
+        {
+            return cached;
+        }
+
+        var plans = new CsvValueConversionPlan[map.Members.Length];
+        for (var i = 0; i < map.Members.Length; i++)
+        {
+            var member = map.Members[i];
+            if (member.Ignore)
+            {
+                continue;
+            }
+
+            plans[i] = CsvValueConverter.CreateConversionPlan(
+                member.PropertyType,
+                Options,
+                member.Converter,
+                member.ConverterOptions);
+        }
+
+        _memberConversionPlanCache[map.RecordType] = plans;
+        return plans;
+    }
+
+    private int[] ResolveAssignableMemberIndices(Mapping.CsvTypeMap map)
+    {
+        if (_assignableMemberIndexCache.TryGetValue(map.RecordType, out var cached))
+        {
+            return cached;
+        }
+
+        var members = new List<int>(map.Members.Length);
+        for (var i = 0; i < map.Members.Length; i++)
+        {
+            var member = map.Members[i];
+            if (member.Ignore || member.Setter is null)
+            {
+                continue;
+            }
+
+            members.Add(i);
+        }
+
+        var indices = members.ToArray();
+        _assignableMemberIndexCache[map.RecordType] = indices;
+        return indices;
+    }
+
+    private CsvSimpleReadPlan? ResolveSimpleReadPlan(
+        Mapping.CsvTypeMap map,
+        int[] indices,
+        CsvValueConversionPlan[] conversionPlans,
+        int[] assignableMemberIndices)
+    {
+        if (_simpleReadPlanCache.TryGetValue(map.RecordType, out var cached))
+        {
+            return cached;
+        }
+
+        var members = new CsvSimpleReadMember[assignableMemberIndices.Length];
+        var isBuiltInOnly = true;
+        for (var i = 0; i < assignableMemberIndices.Length; i++)
+        {
+            var memberIndex = assignableMemberIndices[i];
+            var member = map.Members[memberIndex];
+            var fieldIndex = indices[memberIndex];
+
+            if (fieldIndex < 0 ||
+                member.HasConstant ||
+                member.HasDefault ||
+                member.Optional ||
+                member.Validation is not null)
+            {
+                _simpleReadPlanCache[map.RecordType] = null;
+                return null;
+            }
+
+            members[i] = new CsvSimpleReadMember(memberIndex, fieldIndex, conversionPlans[memberIndex], member);
+            if (!conversionPlans[memberIndex].UseBuiltInPath)
+            {
+                isBuiltInOnly = false;
+            }
+        }
+
+        var plan = new CsvSimpleReadPlan(members, isBuiltInOnly);
+        _simpleReadPlanCache[map.RecordType] = plan;
+        return plan;
+    }
+
+    private Func<CsvReader, T, bool>? ResolveCompiledSimpleMaterializer<T>(CsvSimpleReadPlan plan)
+    {
+        if (typeof(T).IsValueType || !plan.IsBuiltInOnly)
+        {
+            return null;
+        }
+
+        if (_compiledSimpleMaterializerCache.TryGetValue(typeof(T), out var cached))
+        {
+            return (Func<CsvReader, T, bool>)cached;
+        }
+
+        var compiled = BuildCompiledSimpleMaterializer<T>(plan);
+        _compiledSimpleMaterializerCache[typeof(T)] = compiled;
+        return compiled;
+    }
+
+    private static Func<CsvReader, T, bool> BuildCompiledSimpleMaterializer<T>(CsvSimpleReadPlan plan)
+    {
+        var reader = Expression.Parameter(typeof(CsvReader), "reader");
+        var target = Expression.Parameter(typeof(T), "target");
+        var expressions = new List<Expression>(plan.Members.Length * 3 + 1);
+        var variables = new List<ParameterExpression>(plan.Members.Length);
+        var returnTarget = Expression.Label(typeof(bool), "return");
+
+        var tryGetMethodDefinition = typeof(CsvReader).GetMethod(
+            nameof(TryGetBuiltInFieldValue),
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("TryGetBuiltInFieldValue method not found.");
+
+        for (var i = 0; i < plan.Members.Length; i++)
+        {
+            var member = plan.Members[i];
+            var property = member.Member.Property;
+            var propertyType = property.PropertyType;
+            var valueVariable = Expression.Variable(propertyType, $"value{i}");
+            variables.Add(valueVariable);
+
+            var tryGetMethod = tryGetMethodDefinition.MakeGenericMethod(propertyType);
+            var tryGetCall = Expression.Call(
+                reader,
+                tryGetMethod,
+                Expression.Constant(member.FieldIndex),
+                valueVariable);
+            expressions.Add(Expression.IfThen(
+                Expression.IsFalse(tryGetCall),
+                Expression.Return(returnTarget, Expression.Constant(false))));
+
+            Expression targetAccess = target;
+            if (property.DeclaringType is not null && property.DeclaringType != typeof(T))
+            {
+                targetAccess = Expression.Convert(targetAccess, property.DeclaringType);
+            }
+
+            expressions.Add(Expression.Assign(Expression.Property(targetAccess, property), valueVariable));
+        }
+
+        expressions.Add(Expression.Label(returnTarget, Expression.Constant(true)));
+
+        var body = Expression.Block(variables, expressions);
+        return Expression.Lambda<Func<CsvReader, T, bool>>(body, reader, target).Compile();
+    }
+
+    private bool TryGetBuiltInFieldValue<TValue>(int fieldIndex, out TValue value)
+    {
+        if ((uint)fieldIndex >= (uint)CurrentRow.FieldCount)
+        {
+            value = default!;
+            return false;
+        }
+
+        var source = CurrentRow.GetFieldSpan(fieldIndex);
+        var valueType = typeof(TValue);
+        var nullableType = Nullable.GetUnderlyingType(valueType);
+        var effectiveType = nullableType ?? valueType;
+
+        if (source.Length == 0 && (nullableType is not null || !effectiveType.IsValueType))
+        {
+            value = default!;
+            return true;
+        }
+
+        var culture = Options.CultureInfo;
+
+        if (effectiveType == typeof(string))
+        {
+            var text = source.ToString();
+            if (valueType == typeof(string))
+            {
+                value = (TValue)(object)text;
+                return true;
+            }
+
+            if (nullableType == typeof(string))
+            {
+                value = (TValue)(object)text;
+                return true;
+            }
+        }
+
+        if (effectiveType == typeof(int) &&
+            int.TryParse(source, NumberStyles.Integer, culture, out var intValue) &&
+            TryAssignParsedValue(intValue, nullableType, out value))
+        {
+            return true;
+        }
+
+        if (effectiveType == typeof(decimal) &&
+            decimal.TryParse(source, NumberStyles.Number, culture, out var decimalValue) &&
+            TryAssignParsedValue(decimalValue, nullableType, out value))
+        {
+            return true;
+        }
+
+        if (effectiveType == typeof(DateTime) &&
+            TryParseDateTimeBuiltIn(source, culture, out var dateTimeValue) &&
+            TryAssignParsedValue(dateTimeValue, nullableType, out value))
+        {
+            return true;
+        }
+
+        if (effectiveType == typeof(bool) &&
+            TryParseBooleanBuiltIn(source, out var boolValue) &&
+            TryAssignParsedValue(boolValue, nullableType, out value))
+        {
+            return true;
+        }
+
+        if (!CsvValueConverter.TryConvertBuiltInPath(source, valueType, culture, out var converted))
+        {
+            value = default!;
+            return false;
+        }
+
+        if (converted is null)
+        {
+            value = default!;
+            return true;
+        }
+
+        if (converted is TValue typed)
+        {
+            value = typed;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryAssignParsedValue<TParsed, TValue>(TParsed parsed, Type? nullableType, out TValue value)
+    {
+        if (typeof(TValue) == typeof(TParsed))
+        {
+            value = (TValue)(object)parsed!;
+            return true;
+        }
+
+        if (nullableType == typeof(TParsed))
+        {
+            value = (TValue)(object)parsed!;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParseBooleanBuiltIn(ReadOnlySpan<char> source, out bool value)
+    {
+        if (bool.TryParse(source, out value))
+        {
+            return true;
+        }
+
+        if (source.Length == 1)
+        {
+            if (source[0] == '1')
+            {
+                value = true;
+                return true;
+            }
+
+            if (source[0] == '0')
+            {
+                value = false;
+                return true;
+            }
+        }
+
+        value = false;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParseDateTimeBuiltIn(ReadOnlySpan<char> source, CultureInfo culture, out DateTime value)
+    {
+        if (ReferenceEquals(culture, CultureInfo.InvariantCulture) &&
+            DateTime.TryParseExact(source, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
+                out value))
+        {
+            return true;
+        }
+
+        return DateTime.TryParse(source, culture, DateTimeStyles.None, out value);
+    }
+
+    private bool TryPopulateUsingSimpleReadPlan(CsvSimpleReadPlan plan, object target)
+    {
+        for (var i = 0; i < plan.Members.Length; i++)
+        {
+            var memberPlan = plan.Members[i];
+            if (memberPlan.FieldIndex >= CurrentRow.FieldCount)
+            {
+                return false;
+            }
+
+            var valueMemory = CurrentRow.GetFieldMemory(memberPlan.FieldIndex);
+            object? converted;
+
+            if (memberPlan.ConversionPlan.UseBuiltInPath)
+            {
+                if (!CsvValueConverter.TryConvertBuiltInPath(
+                        valueMemory.Span,
+                        memberPlan.Member.PropertyType,
+                        Options.CultureInfo,
+                        out converted))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                var context = new CsvConverterContext(
+                    Options.CultureInfo,
+                    CurrentRow.RowIndex,
+                    memberPlan.FieldIndex,
+                    memberPlan.Member.Name);
+                if (!CsvValueConverter.TryConvert(valueMemory.Span, memberPlan.ConversionPlan, context,
+                        out converted))
+                {
+                    return false;
+                }
+            }
+
+            try
+            {
+                memberPlan.Member.Setter!(target, converted);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private bool TryResolveMemberValue(
         Mapping.CsvPropertyMap member,
         int fieldIndex,
+        in CsvValueConversionPlan conversionPlan,
         out object? converted,
         out ReadOnlyMemory<char> valueMemory)
     {
@@ -570,9 +986,15 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         valueMemory = CurrentRow.GetFieldMemory(fieldIndex);
-        var context = new CsvConverterContext(Options.CultureInfo, CurrentRow.RowIndex, fieldIndex, member.Name);
-        if (!CsvValueConverter.TryConvert(valueMemory.Span, member.PropertyType, Options, member.Converter,
-                member.ConverterOptions, context, out converted))
+        var convertedSuccessfully = conversionPlan.UseBuiltInPath
+            ? CsvValueConverter.TryConvertBuiltInPath(valueMemory.Span, member.PropertyType, Options.CultureInfo,
+                out converted)
+            : CsvValueConverter.TryConvert(
+                valueMemory.Span,
+                conversionPlan,
+                new CsvConverterContext(Options.CultureInfo, CurrentRow.RowIndex, fieldIndex, member.Name),
+                out converted);
+        if (!convertedSuccessfully)
         {
             if (member.HasDefault)
             {
@@ -590,6 +1012,23 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         return ValidateMemberValue(member, fieldIndex, ref converted, valueMemory);
+    }
+
+    private void AssignMemberValue(
+        Mapping.CsvPropertyMap member,
+        object target,
+        object? value,
+        int fieldIndex,
+        ReadOnlyMemory<char> valueMemory)
+    {
+        try
+        {
+            member.Setter!(target, value);
+        }
+        catch (Exception ex)
+        {
+            HandleBadData(fieldIndex, $"Failed to assign member '{member.Name}': {ex.Message}", valueMemory);
+        }
     }
 
     private bool ValidateMemberValue(
@@ -618,6 +1057,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         Mapping.CsvTypeMap map,
         CsvConstructorBinding constructorBinding,
         int[] indices,
+        CsvValueConversionPlan[] conversionPlans,
         out bool[] constructorBoundMembers)
     {
         var parameters = constructorBinding.Constructor.GetParameters();
@@ -631,7 +1071,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             {
                 var member = map.Members[memberIndex];
                 var fieldIndex = indices[memberIndex];
-                if (TryResolveMemberValue(member, fieldIndex, out var value, out _))
+                if (TryResolveMemberValue(member, fieldIndex, conversionPlans[memberIndex], out var value, out _))
                 {
                     args[i] = value;
                 }
@@ -675,12 +1115,35 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
     }
 
-    private object CreateRecordWithDefaultConstructor(Type type)
+    private Func<object> ResolveDefaultConstructorFactory(Type type)
     {
+        if (_defaultConstructorFactoryCache.TryGetValue(type, out var factory))
+        {
+            return factory;
+        }
+
         try
         {
-            return Activator.CreateInstance(type) ??
-                   throw new InvalidOperationException($"Failed to create instance of '{type.Name}'.");
+            Func<object> compiledFactory;
+            if (type.IsValueType)
+            {
+                var body = Expression.Convert(Expression.Default(type), typeof(object));
+                compiledFactory = Expression.Lambda<Func<object>>(body).Compile();
+            }
+            else
+            {
+                var constructor = type.GetConstructor(Type.EmptyTypes);
+                if (constructor is null)
+                {
+                    throw new MissingMethodException(type.FullName, ".ctor()");
+                }
+
+                var body = Expression.Convert(Expression.New(constructor), typeof(object));
+                compiledFactory = Expression.Lambda<Func<object>>(body).Compile();
+            }
+
+            _defaultConstructorFactoryCache[type] = compiledFactory;
+            return compiledFactory;
         }
         catch (MissingMethodException ex)
         {
@@ -886,4 +1349,41 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
         public object?[] ParameterDefaultValues { get; } = parameterDefaultValues;
     }
+
+    private sealed class CsvSimpleReadPlan(CsvSimpleReadMember[] members, bool isBuiltInOnly)
+    {
+        public CsvSimpleReadMember[] Members { get; } = members;
+
+        public bool IsBuiltInOnly { get; } = isBuiltInOnly;
+    }
+
+    private sealed class CsvRecordReadContext(
+        Mapping.CsvTypeMap map,
+        int[] indices,
+        int[] assignableMemberIndices,
+        CsvValueConversionPlan[] conversionPlans,
+        CsvConstructorBinding? constructorBinding,
+        CsvSimpleReadPlan? simpleReadPlan,
+        Func<object>? defaultConstructorFactory)
+    {
+        public Mapping.CsvTypeMap Map { get; } = map;
+
+        public int[] Indices { get; } = indices;
+
+        public int[] AssignableMemberIndices { get; } = assignableMemberIndices;
+
+        public CsvValueConversionPlan[] ConversionPlans { get; } = conversionPlans;
+
+        public CsvConstructorBinding? ConstructorBinding { get; } = constructorBinding;
+
+        public CsvSimpleReadPlan? SimpleReadPlan { get; } = simpleReadPlan;
+
+        public Func<object>? DefaultConstructorFactory { get; } = defaultConstructorFactory;
+    }
+
+    private readonly record struct CsvSimpleReadMember(
+        int MemberIndex,
+        int FieldIndex,
+        CsvValueConversionPlan ConversionPlan,
+        Mapping.CsvPropertyMap Member);
 }
