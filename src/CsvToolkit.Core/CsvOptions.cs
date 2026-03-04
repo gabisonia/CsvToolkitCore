@@ -38,6 +38,20 @@ public sealed class CsvOptions
 
     public Action<CsvBadDataContext>? BadDataFound { get; set; }
 
+    public Action<CsvMissingFieldContext>? MissingFieldFound { get; set; }
+
+    public Action<CsvHeaderValidationContext>? HeaderValidated { get; set; }
+
+    public Func<CsvReadingExceptionContext, bool>? ReadingExceptionOccurred { get; set; }
+
+    public Func<string, int, string> PrepareHeaderForMatch { get; set; } = static (header, _) => header;
+
+    public bool SanitizeForInjection { get; set; }
+
+    public char InjectionEscapeCharacter { get; set; } = '\'';
+
+    public string InjectionCharacters { get; set; } = "=+-@";
+
     public CsvConverterRegistry Converters { get; } = new();
 
     public CsvOptions Clone()
@@ -57,7 +71,14 @@ public sealed class CsvOptions
             HeaderComparer = HeaderComparer,
             CharBufferSize = CharBufferSize,
             ByteBufferSize = ByteBufferSize,
-            BadDataFound = BadDataFound
+            BadDataFound = BadDataFound,
+            MissingFieldFound = MissingFieldFound,
+            HeaderValidated = HeaderValidated,
+            ReadingExceptionOccurred = ReadingExceptionOccurred,
+            PrepareHeaderForMatch = PrepareHeaderForMatch,
+            SanitizeForInjection = SanitizeForInjection,
+            InjectionEscapeCharacter = InjectionEscapeCharacter,
+            InjectionCharacters = InjectionCharacters
         };
 
         return clone.CopyConvertersFrom(this);
@@ -94,6 +115,22 @@ public sealed class CsvOptions
         if (ByteBufferSize <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(ByteBufferSize), "Buffer size must be positive.");
+        }
+
+        if (PrepareHeaderForMatch is null)
+        {
+            throw new ArgumentNullException(nameof(PrepareHeaderForMatch));
+        }
+
+        if (InjectionEscapeCharacter == '\0')
+        {
+            throw new ArgumentOutOfRangeException(nameof(InjectionEscapeCharacter),
+                "Injection escape character cannot be null.");
+        }
+
+        if (InjectionCharacters is null)
+        {
+            throw new ArgumentNullException(nameof(InjectionCharacters));
         }
     }
 }

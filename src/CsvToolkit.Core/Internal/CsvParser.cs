@@ -564,7 +564,14 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
     {
         if (options.ReadMode == CsvReadMode.Strict)
         {
-            throw new CsvException(message, RowIndex, LineNumber, fieldIndex);
+            var exception = new CsvException(message, RowIndex, LineNumber, fieldIndex);
+            if (options.ReadingExceptionOccurred?.Invoke(
+                    new CsvReadingExceptionContext(exception, RowIndex, LineNumber, fieldIndex, rawField)) == true)
+            {
+                return;
+            }
+
+            throw exception;
         }
 
         options.BadDataFound?.Invoke(new CsvBadDataContext(RowIndex, LineNumber, fieldIndex, message, rawField));

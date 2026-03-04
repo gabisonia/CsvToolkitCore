@@ -261,6 +261,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         _headerLookup = BuildHeaderLookup(_headers);
+        Options.HeaderValidated?.Invoke(new CsvHeaderValidationContext(headerRow.RowIndex, headerRow.LineNumber, _headers));
 
         if (Options.DetectColumnCount)
         {
@@ -298,6 +299,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         _headerLookup = BuildHeaderLookup(_headers);
+        Options.HeaderValidated?.Invoke(new CsvHeaderValidationContext(headerRow.RowIndex, headerRow.LineNumber, _headers));
 
         if (Options.DetectColumnCount)
         {
@@ -312,10 +314,11 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         var grouped = new Dictionary<string, List<int>>(headers.Count, Options.HeaderComparer);
         for (var i = 0; i < headers.Count; i++)
         {
-            if (!grouped.TryGetValue(headers[i], out var indices))
+            var preparedHeader = PrepareHeaderForMatch(headers[i], i);
+            if (!grouped.TryGetValue(preparedHeader, out var indices))
             {
                 indices = [];
-                grouped[headers[i]] = indices;
+                grouped[preparedHeader] = indices;
             }
 
             indices.Add(i);
@@ -426,7 +429,8 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
                 continue;
             }
 
-            if (_headerLookup is not null && _headerLookup.TryGetValue(member.Name, out var headerIndices))
+            if (_headerLookup is not null &&
+                _headerLookup.TryGetValue(PrepareHeaderForMatch(member.Name, -1), out var headerIndices))
             {
                 var nameIndex = member.NameIndex ?? 0;
                 if (nameIndex >= 0 && nameIndex < headerIndices.Length)
@@ -473,6 +477,8 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
         if (fieldIndex < 0)
         {
+            NotifyMissingField(member, -1, $"No matching column for member '{member.Name}'.");
+
             if (member.HasDefault)
             {
                 converted = member.DefaultValue;
@@ -490,6 +496,8 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
         if (fieldIndex >= CurrentRow.FieldCount)
         {
+            NotifyMissingField(member, fieldIndex, $"Missing field for member '{member.Name}'.");
+
             if (member.HasDefault)
             {
                 converted = member.DefaultValue;
@@ -720,6 +728,21 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         return Activator.CreateInstance(type);
     }
 
+    private string PrepareHeaderForMatch(string header, int index)
+    {
+        return Options.PrepareHeaderForMatch(header, index) ?? header;
+    }
+
+    private void NotifyMissingField(Mapping.CsvPropertyMap member, int fieldIndex, string message)
+    {
+        Options.MissingFieldFound?.Invoke(new CsvMissingFieldContext(
+            CurrentRow.RowIndex,
+            CurrentRow.LineNumber,
+            fieldIndex,
+            member.Name,
+            message));
+    }
+
     private string GetGeneratedColumnName(int index)
     {
         if (index < _generatedColumnNames.Length)
@@ -749,7 +772,15 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     {
         if (Options.ReadMode == CsvReadMode.Strict)
         {
-            throw new CsvException(message, CurrentRow.RowIndex, CurrentRow.LineNumber, fieldIndex);
+            var exception = new CsvException(message, CurrentRow.RowIndex, CurrentRow.LineNumber, fieldIndex);
+            if (Options.ReadingExceptionOccurred?.Invoke(
+                    new CsvReadingExceptionContext(exception, CurrentRow.RowIndex, CurrentRow.LineNumber, fieldIndex,
+                        rawField)) == true)
+            {
+                return;
+            }
+
+            throw exception;
         }
 
         Options.BadDataFound?.Invoke(new CsvBadDataContext(CurrentRow.RowIndex, CurrentRow.LineNumber, fieldIndex,

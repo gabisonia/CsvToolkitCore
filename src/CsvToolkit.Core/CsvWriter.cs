@@ -83,6 +83,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private void WriteField(ReadOnlySpan<char> value)
     {
+        if (TrySanitizeForInjection(value, out var sanitized))
+        {
+            value = sanitized.AsSpan();
+        }
+
         WriteDelimiterIfNeeded();
 
         if (NeedsQuoting(value))
@@ -428,6 +433,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private async ValueTask WriteFieldCoreAsync(ReadOnlyMemory<char> value, CancellationToken cancellationToken)
     {
+        if (TrySanitizeForInjection(value.Span, out var sanitized))
+        {
+            value = sanitized.AsMemory();
+        }
+
         await WriteDelimiterIfNeededAsync(cancellationToken).ConfigureAwait(false);
 
         if (NeedsQuoting(value.Span))
@@ -443,5 +453,23 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
         _firstField = false;
         _fieldIndex++;
+    }
+
+    private bool TrySanitizeForInjection(ReadOnlySpan<char> value, out string sanitized)
+    {
+        sanitized = string.Empty;
+
+        if (!Options.SanitizeForInjection || value.IsEmpty)
+        {
+            return false;
+        }
+
+        if (Options.InjectionCharacters.AsSpan().IndexOf(value[0]) < 0)
+        {
+            return false;
+        }
+
+        sanitized = string.Concat(Options.InjectionEscapeCharacter, value.ToString());
+        return true;
     }
 }

@@ -439,6 +439,110 @@ public sealed class CsvReaderParsingTests
         Assert.Equal(4, secondLine);
     }
 
+    [Fact]
+    public void PrepareHeaderForMatch_AllowsCustomHeaderNormalization()
+    {
+        // Arrange
+        const string csv = " ID , Name \n1,Ada\n";
+        var options = new CsvOptions
+        {
+            PrepareHeaderForMatch = static (header, _) => header.Trim().ToLowerInvariant()
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<SimpleRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(1, row.Id);
+        Assert.Equal("Ada", row.Name);
+    }
+
+    [Fact]
+    public void HeaderValidated_IsInvokedWhenHeaderIsRead()
+    {
+        // Arrange
+        const string csv = "id,name\n1,Ada\n";
+        var calls = 0;
+        string[]? headers = null;
+        var options = new CsvOptions
+        {
+            HeaderValidated = context =>
+            {
+                calls++;
+                headers = context.Headers.ToArray();
+            }
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(1, calls);
+        Assert.NotNull(headers);
+        Assert.Equal(["id", "name"], headers);
+    }
+
+    [Fact]
+    public void MissingFieldFound_IsInvokedWhenMappedColumnIsMissing()
+    {
+        // Arrange
+        const string csv = "id\n1\n";
+        var calls = 0;
+        CsvMissingFieldContext captured = default;
+        var options = new CsvOptions
+        {
+            ReadMode = CsvReadMode.Lenient,
+            MissingFieldFound = context =>
+            {
+                calls++;
+                captured = context;
+            }
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        _ = reader.GetRecord<SimpleRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(1, calls);
+        Assert.Equal("Name", captured.MemberName);
+        Assert.Equal(-1, captured.FieldIndex);
+    }
+
+    [Fact]
+    public void ReadingExceptionOccurred_CanSuppressStrictParserExceptions()
+    {
+        // Arrange
+        const string csv = "id,name\n1,te\"st\n";
+        var calls = 0;
+        var options = new CsvOptions
+        {
+            ReadMode = CsvReadMode.Strict,
+            ReadingExceptionOccurred = _ =>
+            {
+                calls++;
+                return true;
+            }
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var name = reader.GetField(1);
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("te\"st", name);
+        Assert.Equal(1, calls);
+    }
+
     private sealed class CultureRecord
     {
         public decimal Amount { get; set; }
@@ -447,6 +551,13 @@ public sealed class CsvReaderParsingTests
     }
 
     private sealed class RequiredColumnsRecord
+    {
+        public int Id { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class SimpleRecord
     {
         public int Id { get; set; }
 

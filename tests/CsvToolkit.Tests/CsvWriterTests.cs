@@ -98,6 +98,48 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void WriteField_WhenInjectionSanitizationEnabled_PrefixesEscapeCharacter()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n",
+            SanitizeForInjection = true
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("=SUM(A1:A2)");
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("'=SUM(A1:A2)\n", result);
+    }
+
+    [Fact]
+    public void WriteField_WhenInjectionSanitizationDisabled_DoesNotChangeValue()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n",
+            SanitizeForInjection = false
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("=SUM(A1:A2)");
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("=SUM(A1:A2)\n", result);
+    }
+
+    [Fact]
     public void WriteField_WithTabDelimiter_QuotesWhenNeeded()
     {
         // Arrange
