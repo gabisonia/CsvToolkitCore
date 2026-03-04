@@ -119,7 +119,8 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     {
         var valueMemory = GetFieldMemory(index);
         var context = new CsvConverterContext(Options.CultureInfo, CurrentRow.RowIndex, index, null);
-        if (CsvValueConverter.TryConvert(valueMemory.Span, typeof(TField), Options, null, context, out var converted))
+        if (CsvValueConverter.TryConvert(valueMemory.Span, typeof(TField), Options, null, null, context,
+                out var converted))
         {
             return (TField?)converted;
         }
@@ -570,8 +571,8 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
         valueMemory = CurrentRow.GetFieldMemory(fieldIndex);
         var context = new CsvConverterContext(Options.CultureInfo, CurrentRow.RowIndex, fieldIndex, member.Name);
-        if (!CsvValueConverter.TryConvert(valueMemory.Span, member.PropertyType, Options, member.Converter, context,
-                out converted))
+        if (!CsvValueConverter.TryConvert(valueMemory.Span, member.PropertyType, Options, member.Converter,
+                member.ConverterOptions, context, out converted))
         {
             if (member.HasDefault)
             {

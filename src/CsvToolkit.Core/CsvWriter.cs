@@ -140,7 +140,7 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         }
 
         var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, null);
-        var formatted = CsvValueConverter.FormatToString(value, value.GetType(), Options, null, context);
+        var formatted = CsvValueConverter.FormatToString(value, value.GetType(), Options, null, null, context);
         WriteField(formatted.AsSpan());
     }
 
@@ -174,7 +174,7 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         }
 
         var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, null);
-        var formatted = CsvValueConverter.FormatToString(value, value.GetType(), Options, null, context);
+        var formatted = CsvValueConverter.FormatToString(value, value.GetType(), Options, null, null, context);
         await WriteFieldCoreAsync(formatted.AsMemory(), cancellationToken).ConfigureAwait(false);
     }
 
@@ -226,21 +226,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
                 throw new InvalidOperationException(message);
             }
 
-            if (member.Converter is not null)
-            {
-                var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name);
-                var formatted =
-                    CsvValueConverter.FormatToString(value, member.PropertyType, Options, member.Converter, context);
-                WriteField(formatted.AsSpan());
-            }
-            else if (value is null)
-            {
-                WriteField(ReadOnlySpan<char>.Empty);
-            }
-            else
-            {
-                WriteField(value);
-            }
+            var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name);
+            var formatted =
+                CsvValueConverter.FormatToString(value, member.PropertyType, Options, member.Converter,
+                    member.ConverterOptions, context);
+            WriteField(formatted.AsSpan());
         }
 
         NextRecord();
@@ -277,21 +267,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
                 throw new InvalidOperationException(message);
             }
 
-            if (member.Converter is not null)
-            {
-                var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name);
-                var formatted =
-                    CsvValueConverter.FormatToString(value, member.PropertyType, Options, member.Converter, context);
-                await WriteFieldCoreAsync(formatted.AsMemory(), cancellationToken).ConfigureAwait(false);
-            }
-            else if (value is null)
-            {
-                await WriteFieldCoreAsync(ReadOnlyMemory<char>.Empty, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await WriteFieldAsync(value, cancellationToken).ConfigureAwait(false);
-            }
+            var context = new CsvConverterContext(Options.CultureInfo, RowIndex, _fieldIndex, member.Name);
+            var formatted =
+                CsvValueConverter.FormatToString(value, member.PropertyType, Options, member.Converter,
+                    member.ConverterOptions, context);
+            await WriteFieldCoreAsync(formatted.AsMemory(), cancellationToken).ConfigureAwait(false);
         }
 
         await NextRecordAsync(cancellationToken).ConfigureAwait(false);

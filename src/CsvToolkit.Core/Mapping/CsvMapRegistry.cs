@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
 using CsvToolkit.Core.TypeConversion;
@@ -55,6 +56,7 @@ internal static class CsvTypeMapFactory
                 ConstantValue = null,
                 Validation = null,
                 ValidationMessage = null,
+                ConverterOptions = null,
                 Getter = BuildGetter(type, property),
                 Setter = BuildSetter(type, property)
             };
@@ -73,6 +75,8 @@ internal static class CsvTypeMapFactory
             {
                 map.Index = index.Index;
             }
+
+            ApplyAttributeConfiguration(type, property, map);
 
             if (fluentConfig is not null && fluentConfig.TryGetValue(property, out var overrideConfig))
             {
@@ -123,6 +127,11 @@ internal static class CsvTypeMapFactory
                 {
                     map.Converter = overrideConfig.Converter;
                 }
+
+                if (overrideConfig.ConverterOptions is not null)
+                {
+                    map.ConverterOptions = overrideConfig.ConverterOptions.Clone();
+                }
             }
 
             members.Add(map);
@@ -134,6 +143,261 @@ internal static class CsvTypeMapFactory
             .ToArray();
 
         return new CsvTypeMap(type, ordered);
+    }
+
+    private static void ApplyAttributeConfiguration(Type recordType, PropertyInfo property, CsvPropertyMap map)
+    {
+        if (property.GetCustomAttribute<CsvNameIndexAttribute>() is { } nameIndex)
+        {
+            map.NameIndex = nameIndex.Index;
+        }
+
+        if (property.GetCustomAttribute<CsvOptionalAttribute>() is not null)
+        {
+            map.Optional = true;
+        }
+
+        if (property.GetCustomAttribute<CsvDefaultAttribute>() is { } defaultAttribute)
+        {
+            map.HasDefault = true;
+            map.DefaultValue = ConvertAttributeValue(property, defaultAttribute.Value, nameof(CsvDefaultAttribute));
+        }
+
+        if (property.GetCustomAttribute<CsvConstantAttribute>() is { } constantAttribute)
+        {
+            map.HasConstant = true;
+            map.ConstantValue = ConvertAttributeValue(property, constantAttribute.Value, nameof(CsvConstantAttribute));
+        }
+
+        if (property.GetCustomAttribute<CsvValidateAttribute>() is { } validateAttribute)
+        {
+            map.Validation = BuildValidationDelegate(recordType, property, validateAttribute);
+            map.ValidationMessage = validateAttribute.Message;
+        }
+
+        if (property.GetCustomAttribute<CsvNullValuesAttribute>() is { } nullValuesAttribute)
+        {
+            EnsureConverterOptions(map).AddNullValues(nullValuesAttribute.Values);
+        }
+
+        if (property.GetCustomAttribute<CsvTrueValuesAttribute>() is { } trueValuesAttribute)
+        {
+            EnsureConverterOptions(map).AddTrueValues(trueValuesAttribute.Values);
+        }
+
+        if (property.GetCustomAttribute<CsvFalseValuesAttribute>() is { } falseValuesAttribute)
+        {
+            EnsureConverterOptions(map).AddFalseValues(falseValuesAttribute.Values);
+        }
+
+        if (property.GetCustomAttribute<CsvFormatsAttribute>() is { } formatsAttribute)
+        {
+            EnsureConverterOptions(map).AddFormats(formatsAttribute.Formats);
+        }
+
+        if (property.GetCustomAttribute<CsvNumberStylesAttribute>() is { } numberStylesAttribute)
+        {
+            EnsureConverterOptions(map).NumberStyles = numberStylesAttribute.Styles;
+        }
+
+        if (property.GetCustomAttribute<CsvDateTimeStylesAttribute>() is { } dateTimeStylesAttribute)
+        {
+            EnsureConverterOptions(map).DateTimeStyles = dateTimeStylesAttribute.Styles;
+        }
+
+        if (property.GetCustomAttribute<CsvCultureAttribute>() is { } cultureAttribute)
+        {
+            try
+            {
+                EnsureConverterOptions(map).CultureInfo = CultureInfo.GetCultureInfo(cultureAttribute.Name);
+            }
+            catch (CultureNotFoundException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid culture '{cultureAttribute.Name}' configured for member '{property.Name}'.", ex);
+            }
+        }
+    }
+
+    private static CsvTypeConverterOptions EnsureConverterOptions(CsvPropertyMap map)
+    {
+        return map.ConverterOptions ??= new CsvTypeConverterOptions();
+    }
+
+    private static object? ConvertAttributeValue(PropertyInfo property, object? value, string attributeName)
+    {
+        var propertyType = property.PropertyType;
+        if (value is null)
+        {
+            if (IsNullableType(propertyType))
+            {
+                return null;
+            }
+
+            throw new InvalidOperationException(
+                $"{attributeName} on member '{property.Name}' cannot use null for non-nullable type '{propertyType.Name}'.");
+        }
+
+        if (propertyType.IsInstanceOfType(value))
+        {
+            return value;
+        }
+
+        var targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (targetType.IsInstanceOfType(value))
+        {
+            return value;
+        }
+
+        if (TryConvertValue(value, propertyType, out var converted))
+        {
+            return converted;
+        }
+
+        throw new InvalidOperationException(
+            $"{attributeName} value on member '{property.Name}' is not assignable to '{propertyType.Name}'.");
+    }
+
+    private static bool TryConvertValue(object value, Type targetType, out object? converted)
+    {
+        converted = null;
+        var nonNullableTargetType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (nonNullableTargetType.IsEnum)
+        {
+            if (value is string enumText &&
+                Enum.TryParse(nonNullableTargetType, enumText, ignoreCase: true, out var enumValue))
+            {
+                converted = enumValue;
+                return true;
+            }
+
+            if (IsNumericType(value.GetType()))
+            {
+                try
+                {
+                    var enumUnderlyingType = Enum.GetUnderlyingType(nonNullableTargetType);
+                    var numericValue = Convert.ChangeType(value, enumUnderlyingType, CultureInfo.InvariantCulture);
+                    converted = Enum.ToObject(nonNullableTargetType, numericValue!);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (value is IConvertible && typeof(IConvertible).IsAssignableFrom(nonNullableTargetType))
+        {
+            try
+            {
+                converted = Convert.ChangeType(value, nonNullableTargetType, CultureInfo.InvariantCulture);
+                return true;
+            }
+            catch
+            {
+                // fall through
+            }
+        }
+
+        if (value is string text)
+        {
+            var options = new CsvOptions { CultureInfo = CultureInfo.InvariantCulture };
+            var context = new CsvConverterContext(CultureInfo.InvariantCulture, 0, -1, null);
+            if (CsvValueConverter.TryConvert(text.AsSpan(), targetType, options, null, null, context, out converted))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Func<object?, bool> BuildValidationDelegate(
+        Type recordType,
+        PropertyInfo property,
+        CsvValidateAttribute validateAttribute)
+    {
+        var validatorType = validateAttribute.ValidatorType ?? recordType;
+        var method = validatorType.GetMethod(
+            validateAttribute.MethodName,
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+
+        if (method is null)
+        {
+            throw new InvalidOperationException(
+                $"Validation method '{validateAttribute.MethodName}' was not found on type '{validatorType.Name}' for member '{property.Name}'.");
+        }
+
+        if (method.ReturnType != typeof(bool))
+        {
+            throw new InvalidOperationException(
+                $"Validation method '{validatorType.Name}.{method.Name}' must return bool.");
+        }
+
+        var parameters = method.GetParameters();
+        if (parameters.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"Validation method '{validatorType.Name}.{method.Name}' must have exactly one parameter.");
+        }
+
+        var parameterType = parameters[0].ParameterType;
+        return value =>
+        {
+            if (!TryConvertValidationArgument(value, parameterType, out var converted))
+            {
+                return false;
+            }
+
+            var result = method.Invoke(null, new[] { converted });
+            return result is bool valid && valid;
+        };
+    }
+
+    private static bool TryConvertValidationArgument(object? value, Type parameterType, out object? converted)
+    {
+        converted = null;
+
+        if (value is null)
+        {
+            return IsNullableType(parameterType);
+        }
+
+        if (parameterType.IsInstanceOfType(value))
+        {
+            converted = value;
+            return true;
+        }
+
+        return TryConvertValue(value, parameterType, out converted);
+    }
+
+    private static bool IsNullableType(Type type)
+    {
+        return !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
+    }
+
+    private static bool IsNumericType(Type type)
+    {
+        switch (Type.GetTypeCode(type))
+        {
+            case TypeCode.Byte:
+            case TypeCode.SByte:
+            case TypeCode.Int16:
+            case TypeCode.UInt16:
+            case TypeCode.Int32:
+            case TypeCode.UInt32:
+            case TypeCode.Int64:
+            case TypeCode.UInt64:
+            case TypeCode.Single:
+            case TypeCode.Double:
+            case TypeCode.Decimal:
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static Func<object, object?>? BuildGetter(Type recordType, PropertyInfo property)
@@ -200,6 +464,8 @@ internal sealed class CsvPropertyMap
     public required string? ValidationMessage { get; set; }
 
     public IUntypedCsvTypeConverter? Converter { get; set; }
+
+    public CsvTypeConverterOptions? ConverterOptions { get; set; }
 
     public Func<object, object?>? Getter { get; init; }
 

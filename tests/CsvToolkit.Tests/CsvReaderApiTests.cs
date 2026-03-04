@@ -23,6 +23,24 @@ public sealed class CsvReaderApiTests
     }
 
     [Fact]
+    public void GetField_GenericByName_UsesConverterOptions()
+    {
+        // Arrange
+        const string csv = "flag\nY\n";
+        var options = new CsvOptions();
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("Y").AddFalseValues("N"));
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var flag = reader.GetField<bool>("flag");
+
+        // Assert
+        Assert.True(read);
+        Assert.True(flag);
+    }
+
+    [Fact]
     public void GetRecords_EnumeratesAllRecords()
     {
         // Arrange

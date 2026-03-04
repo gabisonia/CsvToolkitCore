@@ -333,6 +333,208 @@ public sealed class CsvMappingTests
         Assert.Equal(36, row.Age);
     }
 
+    [Fact]
+    public void GlobalConverterOptions_NullAndBooleanValues_AreApplied()
+    {
+        // Arrange
+        const string csv = "id,flag,score\n1,Y,NULL\n";
+        var options = new CsvOptions();
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("Y").AddFalseValues("N"));
+        options.ConverterOptions.Configure<int?>(o => o.AddNullValues("NULL"));
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<ConverterOptionsRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.True(row.Flag);
+        Assert.Null(row.Score);
+    }
+
+    [Fact]
+    public void GlobalConverterOptions_NumberStyles_AreApplied()
+    {
+        // Arrange
+        const string csv = "value\nFF\n";
+        var options = new CsvOptions();
+        options.ConverterOptions.Configure<int>(o => o.NumberStyles = NumberStyles.HexNumber);
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<HexRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(255, row.Value);
+    }
+
+    [Fact]
+    public void GlobalConverterOptions_DateFormats_AreApplied()
+    {
+        // Arrange
+        const string csv = "created\n31-12-2025\n";
+        var options = new CsvOptions { CultureInfo = CultureInfo.InvariantCulture };
+        options.ConverterOptions.Configure<DateTime>(o =>
+        {
+            o.AddFormats("dd-MM-yyyy");
+            o.DateTimeStyles = DateTimeStyles.None;
+        });
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<DateRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(new DateTime(2025, 12, 31), row.Created);
+    }
+
+    [Fact]
+    public void MemberConverterOptions_OverrideGlobalOptions()
+    {
+        // Arrange
+        const string csv = "flag\nT\n";
+        var options = new CsvOptions();
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("Y").AddFalseValues("N"));
+        var maps = new CsvMapRegistry();
+        maps.Register<OverrideBoolRecord>(map =>
+        {
+            map.Map(x => x.Flag).TrueValues("T").FalseValues("F");
+        });
+        using var reader = new CsvReader(new StringReader(csv), options, maps);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<OverrideBoolRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.True(row.Flag);
+    }
+
+    [Fact]
+    public void AttributeMapping_NameIndexAndOptional_AreApplied()
+    {
+        // Arrange
+        const string csv = "name,name\nAda,Lovelace\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<AttributeNameIndexOptionalRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("Ada", row.FirstName);
+        Assert.Equal("Lovelace", row.LastName);
+        Assert.Equal(0, row.Missing);
+    }
+
+    [Fact]
+    public void AttributeMapping_DefaultAndConstant_AreApplied()
+    {
+        // Arrange
+        const string csv = "id,score,country\n1,,FR\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<AttributeDefaultConstantRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(1, row.Id);
+        Assert.Equal(99, row.Score);
+        Assert.Equal("US", row.Country);
+    }
+
+    [Fact]
+    public void AttributeMapping_Validate_ThrowsInStrictMode()
+    {
+        // Arrange
+        const string csv = "age\n15\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var read = reader.Read();
+        Action act = () => reader.GetRecord<AttributeValidationRecord>();
+
+        // Assert
+        Assert.True(read);
+        var exception = Assert.Throws<CsvException>(act);
+        Assert.Equal("Age must be at least 18.", exception.Message);
+    }
+
+    [Fact]
+    public void AttributeConverterOptions_OverrideGlobalOptions()
+    {
+        // Arrange
+        const string csv = "flag,created,amount,score\nT,31-12-2025,FF,NULL\n";
+        var options = new CsvOptions { CultureInfo = CultureInfo.InvariantCulture };
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("Y").AddFalseValues("N"));
+        options.ConverterOptions.Configure<DateTime>(o => o.AddFormats("yyyyMMdd"));
+        options.ConverterOptions.Configure<int>(o => o.NumberStyles = NumberStyles.Integer);
+        options.ConverterOptions.Configure<int?>(o => o.AddNullValues("EMPTY"));
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<AttributeConverterOptionsRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.True(row.Flag);
+        Assert.Equal(new DateTime(2025, 12, 31), row.Created);
+        Assert.Equal(255, row.Amount);
+        Assert.Null(row.Score);
+    }
+
+    [Fact]
+    public void AttributeConverterOptions_Culture_IsApplied()
+    {
+        // Arrange
+        const string csv = "price\n1,5\n";
+        var options = new CsvOptions
+        {
+            Delimiter = ';',
+            CultureInfo = CultureInfo.InvariantCulture
+        };
+        using var reader = new CsvReader(new StringReader(csv), options);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<AttributeCultureRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(1.5m, row.Price);
+    }
+
+    [Fact]
+    public void FluentConverterOptions_OverrideAttributeConverterOptions()
+    {
+        // Arrange
+        const string csv = "flag\nY\n";
+        var maps = new CsvMapRegistry();
+        maps.Register<AttributeFluentOverrideRecord>(map =>
+        {
+            map.Map(x => x.Flag).TrueValues("Y").FalseValues("N");
+        });
+        using var reader = new CsvReader(new StringReader(csv), mapRegistry: maps);
+
+        // Act
+        var read = reader.Read();
+        var row = reader.GetRecord<AttributeFluentOverrideRecord>();
+
+        // Assert
+        Assert.True(read);
+        Assert.True(row.Flag);
+    }
+
     private sealed class UpperCaseStringConverter : ICsvTypeConverter<string>
     {
         public bool TryParse(ReadOnlySpan<char> source, in CsvConverterContext context, out string value)
@@ -502,5 +704,85 @@ public sealed class CsvMappingTests
         public string Name { get; }
 
         public int Age { get; }
+    }
+
+    private sealed class ConverterOptionsRecord
+    {
+        public int Id { get; set; }
+
+        public bool Flag { get; set; }
+
+        public int? Score { get; set; }
+    }
+
+    private sealed class HexRecord
+    {
+        public int Value { get; set; }
+    }
+
+    private sealed class DateRecord
+    {
+        public DateTime Created { get; set; }
+    }
+
+    private sealed class OverrideBoolRecord
+    {
+        public bool Flag { get; set; }
+    }
+
+    private sealed class AttributeNameIndexOptionalRecord
+    {
+        [CsvColumn("name"), CsvNameIndex(0)] public string FirstName { get; set; } = string.Empty;
+
+        [CsvColumn("name"), CsvNameIndex(1)] public string LastName { get; set; } = string.Empty;
+
+        [CsvColumn("missing"), CsvOptional] public int Missing { get; set; }
+    }
+
+    private sealed class AttributeDefaultConstantRecord
+    {
+        public int Id { get; set; }
+
+        [CsvDefault(99)] public int Score { get; set; }
+
+        [CsvConstant("US")] public string Country { get; set; } = string.Empty;
+    }
+
+    private sealed class AttributeValidationRecord
+    {
+        [CsvValidate(nameof(IsAdult), Message = "Age must be at least 18.")]
+        public int Age { get; set; }
+
+        private static bool IsAdult(int age)
+        {
+            return age >= 18;
+        }
+    }
+
+    private sealed class AttributeConverterOptionsRecord
+    {
+        [CsvTrueValues("T"), CsvFalseValues("F")]
+        public bool Flag { get; set; }
+
+        [CsvFormats("dd-MM-yyyy")]
+        public DateTime Created { get; set; }
+
+        [CsvNumberStyles(NumberStyles.HexNumber)]
+        public int Amount { get; set; }
+
+        [CsvNullValues("NULL")]
+        public int? Score { get; set; }
+    }
+
+    private sealed class AttributeCultureRecord
+    {
+        [CsvCulture("fr-FR")]
+        public decimal Price { get; set; }
+    }
+
+    private sealed class AttributeFluentOverrideRecord
+    {
+        [CsvTrueValues("T"), CsvFalseValues("F")]
+        public bool Flag { get; set; }
     }
 }

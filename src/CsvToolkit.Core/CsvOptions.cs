@@ -75,6 +75,8 @@ public sealed class CsvOptions
 
     public CsvConverterRegistry Converters { get; } = new();
 
+    public CsvTypeConverterOptionsRegistry ConverterOptions { get; } = new();
+
     public CsvOptions Clone()
     {
         var clone = new CsvOptions
@@ -105,12 +107,20 @@ public sealed class CsvOptions
             InjectionCharacters = InjectionCharacters
         };
 
-        return clone.CopyConvertersFrom(this);
+        return clone
+            .CopyConvertersFrom(this)
+            .CopyConverterOptionsFrom(this);
     }
 
     internal CsvOptions CopyConvertersFrom(CsvOptions source)
     {
         Converters.CopyFrom(source.Converters);
+        return this;
+    }
+
+    internal CsvOptions CopyConverterOptionsFrom(CsvOptions source)
+    {
+        ConverterOptions.CopyFrom(source.ConverterOptions);
         return this;
     }
 

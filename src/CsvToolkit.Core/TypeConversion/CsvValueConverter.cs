@@ -27,27 +27,37 @@ internal static class CsvValueConverter
         Type targetType,
         CsvOptions options,
         IUntypedCsvTypeConverter? memberConverter,
+        CsvTypeConverterOptions? memberConverterOptions,
         in CsvConverterContext context,
         out object? value)
     {
+        var typeInfo = GetBuiltInTypeInfo(targetType);
+        var converterOptions = ResolveConverterOptions(targetType, options, memberConverterOptions);
+        var culture = converterOptions?.CultureInfo ?? context.CultureInfo;
+        var converterContext = CreateContextWithCulture(context, culture);
+
+        if (typeInfo.AllowsNull && IsNullToken(source, converterOptions))
+        {
+            value = null;
+            return true;
+        }
+
         if (memberConverter is not null)
         {
-            return memberConverter.TryParse(source, targetType, context, out value);
+            return memberConverter.TryParse(source, targetType, converterContext, out value);
         }
 
         if (options.Converters.TryGet(targetType, out var converter))
         {
-            return converter.TryParse(source, targetType, context, out value);
+            return converter.TryParse(source, targetType, converterContext, out value);
         }
 
-        var typeInfo = GetBuiltInTypeInfo(targetType);
-
-        if (TryConvertBuiltIn(source, typeInfo, context.CultureInfo, out value))
+        if (TryConvertBuiltIn(source, typeInfo, culture, converterOptions, out value))
         {
             return true;
         }
 
-        if (TryConvertFallback(source, typeInfo, context.CultureInfo, out value))
+        if (TryConvertFallback(source, typeInfo, culture, converterOptions, out value))
         {
             return true;
         }
@@ -61,26 +71,42 @@ internal static class CsvValueConverter
         Type valueType,
         CsvOptions options,
         IUntypedCsvTypeConverter? memberConverter,
+        CsvTypeConverterOptions? memberConverterOptions,
         in CsvConverterContext context)
     {
+        var converterOptions = ResolveConverterOptions(valueType, options, memberConverterOptions);
+        var culture = converterOptions?.CultureInfo ?? context.CultureInfo;
+        var converterContext = CreateContextWithCulture(context, culture);
+
         if (value is null)
         {
+            if (converterOptions is { NullValues.Count: > 0 })
+            {
+                return converterOptions.NullValues[0];
+            }
+
             return string.Empty;
         }
 
         if (memberConverter is not null)
         {
-            return memberConverter.Format(value, valueType, context);
+            return memberConverter.Format(value, valueType, converterContext);
         }
 
         if (options.Converters.TryGet(valueType, out var converter))
         {
-            return converter.Format(value, valueType, context);
+            return converter.Format(value, valueType, converterContext);
+        }
+
+        if (TryFormatBuiltIn(value, culture, converterOptions, out var builtInFormatted))
+        {
+            return builtInFormatted;
         }
 
         if (value is IFormattable formattable)
         {
-            return formattable.ToString(null, context.CultureInfo) ?? string.Empty;
+            var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
+            return formattable.ToString(format, culture) ?? string.Empty;
         }
 
         return value.ToString() ?? string.Empty;
@@ -90,6 +116,7 @@ internal static class CsvValueConverter
         ReadOnlySpan<char> source,
         in BuiltInTypeInfo typeInfo,
         CultureInfo culture,
+        CsvTypeConverterOptions? converterOptions,
         out object? value)
     {
         if (source.Length == 0 && typeInfo.AllowsNull)
@@ -104,6 +131,21 @@ internal static class CsvValueConverter
                 value = source.ToString();
                 return true;
             case BuiltInTypeKind.Boolean:
+                if (converterOptions is not null)
+                {
+                    if (converterOptions.IsTrueValue(source))
+                    {
+                        value = true;
+                        return true;
+                    }
+
+                    if (converterOptions.IsFalseValue(source))
+                    {
+                        value = false;
+                        return true;
+                    }
+                }
+
                 if (bool.TryParse(source, out var boolValue))
                 {
                     value = boolValue;
@@ -127,7 +169,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Byte:
-                if (byte.TryParse(source, NumberStyles.Integer, culture, out var byteValue))
+                if (byte.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var byteValue))
                 {
                     value = byteValue;
                     return true;
@@ -135,7 +178,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.SByte:
-                if (sbyte.TryParse(source, NumberStyles.Integer, culture, out var sbyteValue))
+                if (sbyte.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var sbyteValue))
                 {
                     value = sbyteValue;
                     return true;
@@ -143,7 +187,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Int16:
-                if (short.TryParse(source, NumberStyles.Integer, culture, out var shortValue))
+                if (short.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var shortValue))
                 {
                     value = shortValue;
                     return true;
@@ -151,7 +196,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.UInt16:
-                if (ushort.TryParse(source, NumberStyles.Integer, culture, out var ushortValue))
+                if (ushort.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var ushortValue))
                 {
                     value = ushortValue;
                     return true;
@@ -159,7 +205,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Int32:
-                if (int.TryParse(source, NumberStyles.Integer, culture, out var intValue))
+                if (int.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var intValue))
                 {
                     value = intValue;
                     return true;
@@ -167,7 +214,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.UInt32:
-                if (uint.TryParse(source, NumberStyles.Integer, culture, out var uintValue))
+                if (uint.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var uintValue))
                 {
                     value = uintValue;
                     return true;
@@ -175,7 +223,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Int64:
-                if (long.TryParse(source, NumberStyles.Integer, culture, out var longValue))
+                if (long.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var longValue))
                 {
                     value = longValue;
                     return true;
@@ -183,7 +232,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.UInt64:
-                if (ulong.TryParse(source, NumberStyles.Integer, culture, out var ulongValue))
+                if (ulong.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Integer, culture,
+                        out var ulongValue))
                 {
                     value = ulongValue;
                     return true;
@@ -191,7 +241,9 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Single:
-                if (float.TryParse(source, NumberStyles.Float | NumberStyles.AllowThousands, culture, out var floatValue))
+                if (float.TryParse(source,
+                        converterOptions?.NumberStyles ?? (NumberStyles.Float | NumberStyles.AllowThousands), culture,
+                        out var floatValue))
                 {
                     value = floatValue;
                     return true;
@@ -199,7 +251,9 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Double:
-                if (double.TryParse(source, NumberStyles.Float | NumberStyles.AllowThousands, culture, out var doubleValue))
+                if (double.TryParse(source,
+                        converterOptions?.NumberStyles ?? (NumberStyles.Float | NumberStyles.AllowThousands), culture,
+                        out var doubleValue))
                 {
                     value = doubleValue;
                     return true;
@@ -207,7 +261,8 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.Decimal:
-                if (decimal.TryParse(source, NumberStyles.Number, culture, out var decimalValue))
+                if (decimal.TryParse(source, converterOptions?.NumberStyles ?? NumberStyles.Number, culture,
+                        out var decimalValue))
                 {
                     value = decimalValue;
                     return true;
@@ -223,7 +278,7 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.DateTime:
-                if (DateTime.TryParse(source, culture, DateTimeStyles.None, out var dateTimeValue))
+                if (TryParseDateTime(source, culture, converterOptions, out var dateTimeValue))
                 {
                     value = dateTimeValue;
                     return true;
@@ -231,7 +286,7 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.DateOnly:
-                if (TryConvertDateOnly(source, culture, out var dateOnlyValue))
+                if (TryConvertDateOnly(source, culture, converterOptions, out var dateOnlyValue))
                 {
                     value = dateOnlyValue;
                     return true;
@@ -239,7 +294,7 @@ internal static class CsvValueConverter
 
                 break;
             case BuiltInTypeKind.TimeOnly:
-                if (TryConvertTimeOnly(source, culture, out var timeOnlyValue))
+                if (TryConvertTimeOnly(source, culture, converterOptions, out var timeOnlyValue))
                 {
                     value = timeOnlyValue;
                     return true;
@@ -272,11 +327,12 @@ internal static class CsvValueConverter
         ReadOnlySpan<char> source,
         in BuiltInTypeInfo typeInfo,
         CultureInfo culture,
+        CsvTypeConverterOptions? converterOptions,
         out object? value)
     {
         try
         {
-            if (source.Length == 0 && typeInfo.AllowsNull)
+            if ((source.Length == 0 || IsNullToken(source, converterOptions)) && typeInfo.AllowsNull)
             {
                 value = null;
                 return true;
@@ -406,7 +462,11 @@ internal static class CsvValueConverter
         return BuiltInTypeKind.Unsupported;
     }
 
-    private static bool TryConvertDateOnly(ReadOnlySpan<char> source, CultureInfo culture, out object? value)
+    private static bool TryConvertDateOnly(
+        ReadOnlySpan<char> source,
+        CultureInfo culture,
+        CsvTypeConverterOptions? converterOptions,
+        out object? value)
     {
         if (DateOnlyFromDateTimeMethod is null)
         {
@@ -414,7 +474,7 @@ internal static class CsvValueConverter
             return false;
         }
 
-        if (!DateTime.TryParse(source, culture, DateTimeStyles.None, out var dateTimeValue))
+        if (!TryParseDateTime(source, culture, converterOptions, out var dateTimeValue))
         {
             value = null;
             return false;
@@ -424,7 +484,11 @@ internal static class CsvValueConverter
         return value is not null;
     }
 
-    private static bool TryConvertTimeOnly(ReadOnlySpan<char> source, CultureInfo culture, out object? value)
+    private static bool TryConvertTimeOnly(
+        ReadOnlySpan<char> source,
+        CultureInfo culture,
+        CsvTypeConverterOptions? converterOptions,
+        out object? value)
     {
         if (TimeOnlyFromDateTimeMethod is null)
         {
@@ -432,7 +496,7 @@ internal static class CsvValueConverter
             return false;
         }
 
-        if (!DateTime.TryParse(source, culture, DateTimeStyles.None, out var dateTimeValue))
+        if (!TryParseDateTime(source, culture, converterOptions, out var dateTimeValue))
         {
             value = null;
             return false;
@@ -440,6 +504,101 @@ internal static class CsvValueConverter
 
         value = TimeOnlyFromDateTimeMethod.Invoke(null, [dateTimeValue]);
         return value is not null;
+    }
+
+    private static bool TryParseDateTime(
+        ReadOnlySpan<char> source,
+        CultureInfo culture,
+        CsvTypeConverterOptions? converterOptions,
+        out DateTime value)
+    {
+        if (converterOptions is { Formats.Count: > 0 })
+        {
+            for (var i = 0; i < converterOptions.Formats.Count; i++)
+            {
+                if (DateTime.TryParseExact(source, converterOptions.Formats[i], culture, converterOptions.DateTimeStyles,
+                        out value))
+                {
+                    return true;
+                }
+            }
+        }
+
+        var styles = converterOptions?.DateTimeStyles ?? DateTimeStyles.None;
+        return DateTime.TryParse(source, culture, styles, out value);
+    }
+
+    private static bool IsNullToken(ReadOnlySpan<char> source, CsvTypeConverterOptions? converterOptions)
+    {
+        if (source.Length == 0)
+        {
+            return true;
+        }
+
+        return converterOptions?.IsNullValue(source) == true;
+    }
+
+    private static CsvTypeConverterOptions? ResolveConverterOptions(
+        Type targetType,
+        CsvOptions options,
+        CsvTypeConverterOptions? memberConverterOptions)
+    {
+        if (memberConverterOptions is not null)
+        {
+            return memberConverterOptions;
+        }
+
+        if (options.ConverterOptions.TryGet(targetType, out var typeOptions))
+        {
+            return typeOptions;
+        }
+
+        return null;
+    }
+
+    private static CsvConverterContext CreateContextWithCulture(in CsvConverterContext context, CultureInfo culture)
+    {
+        if (ReferenceEquals(context.CultureInfo, culture))
+        {
+            return context;
+        }
+
+        return new CsvConverterContext(culture, context.RowIndex, context.FieldIndex, context.ColumnName);
+    }
+
+    private static bool TryFormatBuiltIn(
+        object value,
+        CultureInfo culture,
+        CsvTypeConverterOptions? converterOptions,
+        out string formatted)
+    {
+        if (value is bool boolValue)
+        {
+            if (boolValue && converterOptions is { TrueValues.Count: > 0 })
+            {
+                formatted = converterOptions.TrueValues[0];
+                return true;
+            }
+
+            if (!boolValue && converterOptions is { FalseValues.Count: > 0 })
+            {
+                formatted = converterOptions.FalseValues[0];
+                return true;
+            }
+
+            formatted = boolValue.ToString();
+            return true;
+        }
+
+        if (value is IFormattable formattable)
+        {
+            var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
+            formatted = formattable.ToString(format, culture) ?? string.Empty;
+            return true;
+        }
+
+        formatted = string.Empty;
+        return false;
     }
 
     private readonly record struct BuiltInTypeInfo(Type EffectiveType, bool AllowsNull, BuiltInTypeKind Kind);

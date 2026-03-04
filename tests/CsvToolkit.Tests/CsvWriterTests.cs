@@ -418,6 +418,101 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void WriteRecord_UsesGlobalConverterOptionsForBooleanAndDateFormats()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n"
+        };
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("YES").AddFalseValues("NO"));
+        options.ConverterOptions.Configure<DateTime>(o => o.AddFormats("yyyyMMdd"));
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteRecord(new ConverterOptionsWriteRecord
+        {
+            Flag = true,
+            Created = new DateTime(2025, 12, 31),
+            Note = null
+        });
+        var csv = text.ToString();
+
+        // Assert
+        Assert.Equal("YES,20251231,\n", csv);
+    }
+
+    [Fact]
+    public void WriteRecord_UsesConfiguredNullValueToken()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n"
+        };
+        options.ConverterOptions.Configure<string>(o => o.AddNullValues("NULL"));
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteRecord(new NullTokenWriteRecord
+        {
+            Value = null
+        });
+        var csv = text.ToString();
+
+        // Assert
+        Assert.Equal("NULL\n", csv);
+    }
+
+    [Fact]
+    public void WriteRecord_UsesAttributeConverterOptions()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n"
+        };
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("TRUE").AddFalseValues("FALSE"));
+        options.ConverterOptions.Configure<DateTime>(o => o.AddFormats("yyyy-MM-dd"));
+        options.ConverterOptions.Configure<string>(o => o.AddNullValues("<null>"));
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteRecord(new AttributeConverterOptionsWriteRecord
+        {
+            Flag = true,
+            Created = new DateTime(2025, 12, 31),
+            Note = null
+        });
+        var csv = text.ToString();
+
+        // Assert
+        Assert.Equal("Y,31122025,NULL\n", csv);
+    }
+
+    [Fact]
+    public void WriteRecord_WithAttributeValidation_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        Action act = () => writer.WriteRecord(new AttributeValidationWriteRecord
+        {
+            Id = 0
+        });
+
+        // Assert
+        var exception = Assert.Throws<InvalidOperationException>(act);
+        Assert.Equal("Id must be positive.", exception.Message);
+    }
+
+    [Fact]
     public void WriteRecord_Null_ThrowsArgumentNullException()
     {
         // Arrange
@@ -459,5 +554,45 @@ public sealed class CsvWriterTests
         yield return new WriteRecord { Id = 1, Name = "Ada", Notes = "N1" };
         await Task.Yield();
         yield return new WriteRecord { Id = 2, Name = "Bob", Notes = "N2" };
+    }
+
+    private sealed class ConverterOptionsWriteRecord
+    {
+        public bool Flag { get; set; }
+
+        public DateTime Created { get; set; }
+
+        public string? Note { get; set; }
+    }
+
+    private sealed class NullTokenWriteRecord
+    {
+        public string? Value { get; set; }
+    }
+
+    private sealed class AttributeConverterOptionsWriteRecord
+    {
+        [CsvTrueValues("Y"), CsvFalseValues("N")]
+        public bool Flag { get; set; }
+
+        [CsvFormats("ddMMyyyy")]
+        public DateTime Created { get; set; }
+
+        [CsvNullValues("NULL")]
+        public string? Note { get; set; }
+    }
+
+    private sealed class AttributeValidationWriteRecord
+    {
+        [CsvValidate(typeof(AttributeValidation), nameof(AttributeValidation.IsPositive), Message = "Id must be positive.")]
+        public int Id { get; set; }
+    }
+
+    private static class AttributeValidation
+    {
+        public static bool IsPositive(int value)
+        {
+            return value > 0;
+        }
     }
 }

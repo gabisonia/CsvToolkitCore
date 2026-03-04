@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
 using CsvToolkit.Core.TypeConversion;
@@ -112,6 +113,58 @@ public sealed class CsvMemberMapBuilder<T, TProperty>
         _config.Converter = new CsvTypeConverterAdapter<TProperty>(converter);
         return this;
     }
+
+    public CsvMemberMapBuilder<T, TProperty> NullValues(params string[] values)
+    {
+        EnsureConverterOptions().AddNullValues(values);
+        return this;
+    }
+
+    public CsvMemberMapBuilder<T, TProperty> TrueValues(params string[] values)
+    {
+        EnsureConverterOptions().AddTrueValues(values);
+        return this;
+    }
+
+    public CsvMemberMapBuilder<T, TProperty> FalseValues(params string[] values)
+    {
+        EnsureConverterOptions().AddFalseValues(values);
+        return this;
+    }
+
+    public CsvMemberMapBuilder<T, TProperty> Formats(params string[] formats)
+    {
+        EnsureConverterOptions().AddFormats(formats);
+        return this;
+    }
+
+    public CsvMemberMapBuilder<T, TProperty> NumberStyles(NumberStyles styles)
+    {
+        EnsureConverterOptions().NumberStyles = styles;
+        return this;
+    }
+
+    public CsvMemberMapBuilder<T, TProperty> DateTimeStyles(DateTimeStyles styles)
+    {
+        EnsureConverterOptions().DateTimeStyles = styles;
+        return this;
+    }
+
+    public CsvMemberMapBuilder<T, TProperty> Culture(CultureInfo culture)
+    {
+        if (culture is null)
+        {
+            throw new ArgumentNullException(nameof(culture));
+        }
+
+        EnsureConverterOptions().CultureInfo = culture;
+        return this;
+    }
+
+    private CsvTypeConverterOptions EnsureConverterOptions()
+    {
+        return _config.ConverterOptions ??= new CsvTypeConverterOptions();
+    }
 }
 
 internal sealed class CsvFluentMemberConfig
@@ -139,6 +192,8 @@ internal sealed class CsvFluentMemberConfig
     public string? ValidationMessage { get; set; }
 
     public IUntypedCsvTypeConverter? Converter { get; set; }
+
+    public CsvTypeConverterOptions? ConverterOptions { get; set; }
 }
 
 internal static class PropertyAccessor
