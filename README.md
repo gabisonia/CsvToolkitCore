@@ -9,14 +9,14 @@
 [![publish-beta](https://github.com/gabisonia/CsvToolkitCore/actions/workflows/publish-beta.yml/badge.svg)](https://github.com/gabisonia/CsvToolkitCore/actions/workflows/publish-beta.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-`CsvToolkit.Core` is a high-performance CSV library for `net10.0` focused on streaming and low allocations with `Span<T>`, `Memory<T>`, and `ArrayPool<T>`.
+`CsvToolkit.Core` is a high-performance CSV library targeting `netstandard2.1`, focused on streaming and low allocations with `Span<T>`, `Memory<T>`, and `ArrayPool<T>`.
 
 ## NuGet
 
 Package name on NuGet.org: `CsvToolkit.Core`
 
 ```bash
-dotnet add package CsvToolkit.Core --prerelease
+dotnet add package CsvToolkit.Core
 ```
 
 ## License
@@ -28,24 +28,29 @@ This project is licensed under the MIT License. See [`LICENSE`](LICENSE).
 ```csharp
 var options = new CsvOptions
 {
-    Delimiter = ',',
+    DelimiterString = ",", // supports multi-character delimiters too
+    DetectDelimiter = false,
+    DelimiterCandidates = new[] { ",", ";", "\t", "|" },
     HasHeader = true,
     Quote = '"',
     Escape = '"',
     TrimOptions = CsvTrimOptions.Trim,
     DetectColumnCount = true,
     ReadMode = CsvReadMode.Strict,
-    CultureInfo = CultureInfo.InvariantCulture
+    CultureInfo = CultureInfo.InvariantCulture,
+    PrepareHeaderForMatch = static (header, _) => header.Trim().ToLowerInvariant(),
+    SanitizeForInjection = true
 };
 
 using var reader = new CsvReader(streamOrTextReader, options);
 using var writer = new CsvWriter(streamOrTextWriter, options);
 
 // Row/field iteration
-while (reader.TryReadRow(out var row))
+while (reader.TryReadRow(out _))
 {
-    ReadOnlySpan<char> field = row.GetFieldSpan(0);
-    string materialized = row.GetFieldString(1);
+    int id = reader.GetField<int>("id");
+    ReadOnlySpan<char> name = reader.GetFieldSpan(1);
+    string materialized = reader.GetField("email");
 }
 
 // Dictionary / dynamic
@@ -56,10 +61,18 @@ if (reader.TryReadDynamic(out dynamic dyn)) { /* ExpandoObject */ }
 while (reader.TryReadRecord<MyRow>(out var record)) { }
 writer.WriteHeader<MyRow>();
 writer.WriteRecord(new MyRow());
+var records = new List<MyRow> { new MyRow() };
+writer.WriteRecords(records, writeHeader: false);
 
 // Async
-await reader.ReadAsync();
+while (await reader.ReadAsync()) { var current = reader.GetRecord<MyRow>(); }
+await reader.ReadRecordAsync<MyRow>();
+await foreach (var row in reader.GetRecordsAsync<MyRow>()) { }
 await writer.WriteRecordAsync(new MyRow());
+await writer.WriteRecordsAsync(records, writeHeader: true);
+
+// ADO.NET adapter
+using var dataReader = reader.AsDataReader();
 ```
 
 ## Features
@@ -69,18 +82,28 @@ await writer.WriteRecordAsync(new MyRow());
 - Streaming row-by-row parser (no full-file load)
 - Quoted fields, escaped quotes, delimiters inside quotes, CRLF/LF handling
 - Header support, delimiter/quote/escape/newline configuration
-- Trim options and strict/lenient error handling with callback context
+- Multi-character delimiters via `DelimiterString`
+- Optional delimiter auto-detection via `DetectDelimiter` + `DelimiterCandidates`
+- Trim options and strict/lenient error handling
+- Error and validation callbacks: `BadDataFound`, `MissingFieldFound`, `HeaderValidated`, `ReadingExceptionOccurred`
+- Header normalization callback: `PrepareHeaderForMatch`
 - Field access as `ReadOnlySpan<char>` / `ReadOnlyMemory<char>`
+- Typed field access helpers: `GetField<T>(index)` / `GetField<T>(name, nameIndex)`
+- Reader APIs: `TryReadRow`, `ReadAsync`, `TryReadDictionary`, `ReadDictionaryAsync`, `TryReadDynamic`
+- Record APIs: `TryReadRecord<T>`, `ReadRecordAsync<T>`, `GetRecords<T>`, `GetRecordsAsync<T>`
+- `CsvDataReader` adapter via `AsDataReader()`
 - POCO mapping with:
   - Attributes: `[CsvColumn]`, `[CsvIndex]`, `[CsvIgnore]`, `[CsvNameIndex]`, `[CsvOptional]`, `[CsvDefault]`, `[CsvConstant]`, `[CsvValidate]`
   - Converter option attributes: `[CsvNullValues]`, `[CsvTrueValues]`, `[CsvFalseValues]`, `[CsvFormats]`, `[CsvNumberStyles]`, `[CsvDateTimeStyles]`, `[CsvCulture]`
   - Fluent mapping: `CsvMapRegistry.Register<T>(...)` with `Optional`, `Default`, `Constant`, `Validate`, `NameIndex`, member converter options
+  - Constructor-based record materialization (immutable / constructor-only models)
 - Type conversion:
   - primitives, enums, nullable, `DateTime`, `DateOnly`, `TimeOnly`, `Guid`
   - culture-aware parsing/formatting
   - custom converters (`ICsvTypeConverter<T>`)
   - global converter options per type via `CsvOptions.ConverterOptions`
-- Async read/write entry points
+- Writer bulk APIs: `WriteRecords(...)`, `WriteRecordsAsync(...)`
+- CSV injection sanitization for spreadsheet-safe output (`SanitizeForInjection`)
 
 ## Examples
 
