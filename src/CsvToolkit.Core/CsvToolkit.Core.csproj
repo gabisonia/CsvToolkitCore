@@ -18,7 +18,7 @@
         <RepositoryType>git</RepositoryType>
         <PackageReadmeFile>README.md</PackageReadmeFile>
 
-        <VersionPrefix>0.3.1</VersionPrefix>
+        <VersionPrefix>0.3.2</VersionPrefix>
 
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>

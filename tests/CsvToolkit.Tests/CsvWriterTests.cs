@@ -1,6 +1,7 @@
 using CsvToolkit.Core.Mapping;
 using CsvToolkit.Core.TypeConversion;
 using System.Globalization;
+using System.Text;
 
 namespace CsvToolkit.Core.Tests;
 
@@ -117,6 +118,27 @@ public sealed class CsvWriterTests
 
         // Assert
         Assert.Equal("'=SUM(A1:A2)\n", result);
+    }
+
+    [Fact]
+    public void WriteField_WhenInjectionSanitizationAndQuotingAreBothNeeded_PreservesEscaping()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n",
+            SanitizeForInjection = true
+        };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("=SUM(\"A1\",A2)");
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("\"'=SUM(\"\"A1\"\",A2)\"\n", result);
     }
 
     [Fact]
@@ -280,6 +302,34 @@ public sealed class CsvWriterTests
 
         // Assert
         Assert.Equal("1,12.5,True,Ada\n", result);
+    }
+
+    [Fact]
+    public void WriteRecord_BuiltInTypes_StreamOutput_PreservesInvariantFormatting()
+    {
+        // Arrange
+        var options = new CsvOptions
+        {
+            NewLine = "\n",
+            CultureInfo = CultureInfo.InvariantCulture
+        };
+        using var stream = new MemoryStream();
+        using var writer = new CsvWriter(stream, options, leaveOpen: true);
+
+        // Act
+        writer.WriteRecord(new BuiltInStreamWriteRecord
+        {
+            Id = 1,
+            Amount = 12.5m,
+            CreatedAt = new DateTime(2025, 1, 2, 3, 4, 5),
+            Enabled = true,
+            Name = "Ada"
+        });
+        writer.Flush();
+        var csv = Encoding.UTF8.GetString(stream.ToArray());
+
+        // Assert
+        Assert.Equal("1,12.5,01/02/2025 03:04:05,True,Ada\n", csv);
     }
 
     [Fact]
@@ -610,6 +660,19 @@ public sealed class CsvWriterTests
         public int Id { get; set; }
 
         public decimal Amount { get; set; }
+
+        public bool Enabled { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class BuiltInStreamWriteRecord
+    {
+        public int Id { get; set; }
+
+        public decimal Amount { get; set; }
+
+        public DateTime CreatedAt { get; set; }
 
         public bool Enabled { get; set; }
 

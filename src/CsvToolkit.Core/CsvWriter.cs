@@ -1,5 +1,9 @@
+using System.Buffers;
+using System.Buffers.Text;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Text;
 using CsvToolkit.Core.Internal;
 using CsvToolkit.Core.Mapping;
 using CsvToolkit.Core.TypeConversion;
@@ -11,6 +15,8 @@ namespace CsvToolkit.Core;
 /// </summary>
 public sealed class CsvWriter : IDisposable, IAsyncDisposable
 {
+    private static readonly byte[] TrueUtf8Bytes = [(byte)'T', (byte)'r', (byte)'u', (byte)'e'];
+    private static readonly byte[] FalseUtf8Bytes = [(byte)'F', (byte)'a', (byte)'l', (byte)'s', (byte)'e'];
     private static readonly MethodInfo WriteStringFieldValueMethod = typeof(CsvWriter).GetMethod(
         nameof(WriteStringFieldValue),
         BindingFlags.Instance | BindingFlags.NonPublic)
@@ -84,6 +90,7 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new InvalidOperationException("WriteNullableBooleanFieldValueWithOptions method not found.");
     private readonly ICsvCharOutput _output;
+    private readonly Utf8StreamOutput? _utf8Output;
     private readonly CsvMapRegistry _mapRegistry;
     private readonly Dictionary<Type, int[]> _writableMemberIndexCache = new();
     private readonly Dictionary<Type, CsvValueConversionPlan[]> _memberFormattingPlanCache = new();
@@ -91,6 +98,8 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     private readonly Dictionary<Type, object> _compiledSimpleWriterCache = new();
     private readonly Dictionary<Type, object> _compiledAsyncSimpleWriterCache = new();
     private readonly char[] _charScratch = new char[2];
+    private readonly byte[]? _delimiterUtf8;
+    private readonly byte[]? _newLineUtf8;
     private bool _firstField = true;
     private int _fieldIndex;
 
@@ -106,6 +115,9 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         Options.Validate();
         _mapRegistry = mapRegistry ?? new CsvMapRegistry();
         _output = new TextWriterOutput(writer, leaveOpen);
+        _utf8Output = null;
+        _delimiterUtf8 = null;
+        _newLineUtf8 = null;
     }
 
     public CsvWriter(Stream stream, CsvOptions? options = null, CsvMapRegistry? mapRegistry = null,
@@ -119,7 +131,10 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         Options = (options ?? CsvOptions.Default).Clone();
         Options.Validate();
         _mapRegistry = mapRegistry ?? new CsvMapRegistry();
-        _output = new Utf8StreamOutput(stream, Options.ByteBufferSize, leaveOpen);
+        _utf8Output = new Utf8StreamOutput(stream, Options.ByteBufferSize, leaveOpen);
+        _output = _utf8Output;
+        _delimiterUtf8 = Encoding.UTF8.GetBytes(Options.DelimiterString);
+        _newLineUtf8 = Encoding.UTF8.GetBytes(Options.NewLine ?? Environment.NewLine);
     }
 
     private CsvOptions Options { get; }
@@ -202,6 +217,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private void WriteInt32FieldValue(int value)
     {
+        if (TryWriteUtf8FormattedInt32(value, format: null, Options.CultureInfo))
+        {
+            return;
+        }
+
         Span<char> buffer = stackalloc char[32];
         if (value.TryFormat(buffer, out var written, default, Options.CultureInfo))
         {
@@ -241,6 +261,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private void WriteDecimalFieldValue(decimal value)
     {
+        if (TryWriteUtf8FormattedDecimal(value, format: null, Options.CultureInfo))
+        {
+            return;
+        }
+
         Span<char> buffer = stackalloc char[64];
         if (value.TryFormat(buffer, out var written, default, Options.CultureInfo))
         {
@@ -280,6 +305,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private void WriteDateTimeFieldValue(DateTime value)
     {
+        if (TryWriteUtf8FormattedDateTime(value, format: null, Options.CultureInfo))
+        {
+            return;
+        }
+
         Span<char> buffer = stackalloc char[128];
         if (value.TryFormat(buffer, out var written, default, Options.CultureInfo))
         {
@@ -319,6 +349,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private void WriteBooleanFieldValue(bool value)
     {
+        if (TryWriteUtf8Field(value ? TrueUtf8Bytes : FalseUtf8Bytes))
+        {
+            return;
+        }
+
         if (value)
         {
             WriteField("True".AsSpan());
@@ -334,7 +369,17 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         {
             if (converterOptions is { TrueValues.Count: > 0 })
             {
+                if (TryWriteUtf8AsciiField(converterOptions.TrueValues[0]))
+                {
+                    return;
+                }
+
                 WriteField(converterOptions.TrueValues[0].AsSpan());
+                return;
+            }
+
+            if (TryWriteUtf8Field(TrueUtf8Bytes))
+            {
                 return;
             }
 
@@ -344,7 +389,17 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
         if (converterOptions is { FalseValues.Count: > 0 })
         {
+            if (TryWriteUtf8AsciiField(converterOptions.FalseValues[0]))
+            {
+                return;
+            }
+
             WriteField(converterOptions.FalseValues[0].AsSpan());
+            return;
+        }
+
+        if (TryWriteUtf8Field(FalseUtf8Bytes))
+        {
             return;
         }
 
@@ -530,8 +585,16 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     public void NextRecord()
     {
-        var newLine = Options.NewLine ?? Environment.NewLine;
-        _output.Write(newLine.AsSpan());
+        if (_utf8Output is not null)
+        {
+            _utf8Output.WriteUtf8(_newLineUtf8!);
+        }
+        else
+        {
+            var newLine = Options.NewLine ?? Environment.NewLine;
+            _output.Write(newLine.AsSpan());
+        }
+
         _firstField = true;
         _fieldIndex = 0;
         RowIndex++;
@@ -540,8 +603,16 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     public async ValueTask NextRecordAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var newLine = Options.NewLine ?? Environment.NewLine;
-        await _output.WriteAsync(newLine.AsMemory(), cancellationToken).ConfigureAwait(false);
+        if (_utf8Output is not null)
+        {
+            await _utf8Output.WriteUtf8Async(_newLineUtf8!, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var newLine = Options.NewLine ?? Environment.NewLine;
+            await _output.WriteAsync(newLine.AsMemory(), cancellationToken).ConfigureAwait(false);
+        }
+
         _firstField = true;
         _fieldIndex = 0;
         RowIndex++;
@@ -714,7 +785,7 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             await WriteHeaderAsync<T>(cancellationToken).ConfigureAwait(false);
         }
 
-        await foreach (var record in records.ConfigureAwait(false))
+        await foreach (var record in records.ConfigureAwait(false).WithCancellation(cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             await WriteRecordAsync(record!, cancellationToken).ConfigureAwait(false);
@@ -1046,6 +1117,12 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return;
         }
 
+        if (_utf8Output is not null)
+        {
+            _utf8Output.WriteUtf8(_delimiterUtf8!);
+            return;
+        }
+
         var delimiter = Options.DelimiterString;
         if (delimiter.Length == 1)
         {
@@ -1064,6 +1141,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
             return default;
         }
 
+        if (_utf8Output is not null)
+        {
+            return _utf8Output.WriteUtf8Async(_delimiterUtf8!, cancellationToken);
+        }
+
         var delimiter = Options.DelimiterString;
         if (delimiter.Length == 1)
         {
@@ -1072,6 +1154,13 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         }
 
         return _output.WriteAsync(delimiter.AsMemory(), cancellationToken);
+    }
+
+    private static bool ContainsDelimiter(ReadOnlySpan<char> source, ReadOnlySpan<char> delimiter)
+    {
+        return delimiter.Length != 0 &&
+               source.Length >= delimiter.Length &&
+               source.IndexOf(delimiter) >= 0;
     }
 
     private bool NeedsQuoting(ReadOnlySpan<char> value)
@@ -1094,36 +1183,6 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         foreach (var ch in value)
         {
             if (ch == Options.Quote || ch == '\r' || ch == '\n')
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool ContainsDelimiter(ReadOnlySpan<char> source, ReadOnlySpan<char> delimiter)
-    {
-        if (delimiter.Length == 0 || source.Length < delimiter.Length)
-        {
-            return false;
-        }
-
-        for (var i = 0; i <= source.Length - delimiter.Length; i++)
-        {
-            var matched = true;
-            for (var j = 0; j < delimiter.Length; j++)
-            {
-                if (source[i + j] == delimiter[j])
-                {
-                    continue;
-                }
-
-                matched = false;
-                break;
-            }
-
-            if (matched)
             {
                 return true;
             }
@@ -1191,12 +1250,23 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
 
     private void WriteChar(char value)
     {
+        if (_utf8Output is not null && value <= 0x7F)
+        {
+            _utf8Output.WriteByte((byte)value);
+            return;
+        }
+
         _charScratch[0] = value;
         _output.Write(_charScratch.AsSpan(0, 1));
     }
 
     private ValueTask WriteCharAsync(char value, CancellationToken cancellationToken)
     {
+        if (_utf8Output is not null && value <= 0x7F)
+        {
+            return _utf8Output.WriteByteAsync((byte)value, cancellationToken);
+        }
+
         _charScratch[0] = value;
         return _output.WriteAsync(_charScratch.AsMemory(0, 1), cancellationToken);
     }
@@ -1247,6 +1317,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     {
         var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
         var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
+        if (TryWriteUtf8FormattedInt32(value, format, culture))
+        {
+            return;
+        }
+
         Span<char> buffer = stackalloc char[32];
         if (value.TryFormat(buffer, out var written, format, culture))
         {
@@ -1261,6 +1336,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     {
         var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
         var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
+        if (TryWriteUtf8FormattedDecimal(value, format, culture))
+        {
+            return;
+        }
+
         Span<char> buffer = stackalloc char[64];
         if (value.TryFormat(buffer, out var written, format, culture))
         {
@@ -1275,6 +1355,11 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     {
         var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
         var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
+        if (TryWriteUtf8FormattedDateTime(value, format, culture))
+        {
+            return;
+        }
+
         Span<char> buffer = stackalloc char[128];
         if (value.TryFormat(buffer, out var written, format, culture))
         {
@@ -1289,11 +1374,205 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
     {
         if (converterOptions is { NullValues.Count: > 0 })
         {
+            if (TryWriteUtf8AsciiField(converterOptions.NullValues[0]))
+            {
+                return;
+            }
+
             WriteField(converterOptions.NullValues[0].AsSpan());
             return;
         }
 
+        if (TryWriteUtf8Field(ReadOnlySpan<byte>.Empty))
+        {
+            return;
+        }
+
         WriteField(ReadOnlySpan<char>.Empty);
+    }
+
+    private bool TryWriteUtf8FormattedInt32(int value, string? format, CultureInfo culture)
+    {
+        if (_utf8Output is null || format is not null || !IsInvariantCulture(culture))
+        {
+            return false;
+        }
+
+        Span<byte> buffer = stackalloc byte[32];
+        return Utf8Formatter.TryFormat(value, buffer, out var written) && TryWriteUtf8Field(buffer[..written]);
+    }
+
+    private bool TryWriteUtf8FormattedDecimal(decimal value, string? format, CultureInfo culture)
+    {
+        if (_utf8Output is null || format is not null || !IsInvariantCulture(culture))
+        {
+            return false;
+        }
+
+        Span<byte> buffer = stackalloc byte[64];
+        return Utf8Formatter.TryFormat(value, buffer, out var written) && TryWriteUtf8Field(buffer[..written]);
+    }
+
+    private bool TryWriteUtf8FormattedDateTime(DateTime value, string? format, CultureInfo culture)
+    {
+        if (_utf8Output is null || !IsInvariantCulture(culture))
+        {
+            return false;
+        }
+
+        StandardFormat standardFormat;
+        if (string.IsNullOrEmpty(format))
+        {
+            standardFormat = new StandardFormat('G');
+        }
+        else if (format.Length == 1 && TryGetSupportedUtf8DateTimeFormat(format[0], out standardFormat))
+        {
+        }
+        else
+        {
+            return false;
+        }
+
+        Span<byte> buffer = stackalloc byte[64];
+        return Utf8Formatter.TryFormat(value, buffer, out var written, standardFormat) &&
+               TryWriteUtf8Field(buffer[..written]);
+    }
+
+    private bool TryWriteUtf8AsciiField(string value)
+    {
+        if (_utf8Output is null || !IsAscii(value))
+        {
+            return false;
+        }
+
+        if (value.Length <= 256)
+        {
+            Span<byte> buffer = stackalloc byte[value.Length];
+            for (var i = 0; i < value.Length; i++)
+            {
+                buffer[i] = (byte)value[i];
+            }
+
+            return TryWriteUtf8Field(buffer);
+        }
+
+        var bufferArray = new byte[value.Length];
+        for (var i = 0; i < value.Length; i++)
+        {
+            bufferArray[i] = (byte)value[i];
+        }
+
+        return TryWriteUtf8Field(bufferArray);
+    }
+
+    private bool TryWriteUtf8Field(ReadOnlySpan<byte> value)
+    {
+        if (_utf8Output is null || !CanWriteUtf8FieldDirect(value))
+        {
+            return false;
+        }
+
+        WriteDelimiterIfNeeded();
+        _utf8Output.WriteUtf8(value);
+        _firstField = false;
+        _fieldIndex++;
+        return true;
+    }
+
+    private bool CanWriteUtf8FieldDirect(ReadOnlySpan<byte> value)
+    {
+        if (RequiresInjectionPrefix(value))
+        {
+            return false;
+        }
+
+        if (value.IsEmpty)
+        {
+            return true;
+        }
+
+        if (IsAsciiWhitespace(value[0]) || IsAsciiWhitespace(value[^1]))
+        {
+            return false;
+        }
+
+        if (_delimiterUtf8 is { Length: > 0 } delimiterUtf8 &&
+            value.Length >= delimiterUtf8.Length &&
+            value.IndexOf(delimiterUtf8) >= 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            var b = value[i];
+            if ((_utf8Output is not null && Options.Quote <= 0x7F && b == (byte)Options.Quote) ||
+                b == (byte)'\r' ||
+                b == (byte)'\n')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool RequiresInjectionPrefix(ReadOnlySpan<byte> value)
+    {
+        if (!Options.SanitizeForInjection || value.IsEmpty)
+        {
+            return false;
+        }
+
+        var first = value[0];
+        foreach (var ch in Options.InjectionCharacters)
+        {
+            if (ch <= 0x7F && first == (byte)ch)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInvariantCulture(CultureInfo culture)
+    {
+        return culture.Name.Length == 0;
+    }
+
+    private static bool IsAscii(string value)
+    {
+        foreach (var ch in value)
+        {
+            if (ch > 0x7F)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsAsciiWhitespace(byte value)
+    {
+        return value == (byte)' ' || value == (byte)'\t' || value == (byte)'\f' || value == (byte)'\v';
+    }
+
+    private static bool TryGetSupportedUtf8DateTimeFormat(char format, out StandardFormat standardFormat)
+    {
+        switch (format)
+        {
+            case 'G':
+            case 'O':
+            case 'R':
+            case 'l':
+                standardFormat = new StandardFormat(format);
+                return true;
+            default:
+                standardFormat = default;
+                return false;
+        }
     }
 
     private ValueTask WriteFormattedInt32Async(int value, CsvTypeConverterOptions? converterOptions,

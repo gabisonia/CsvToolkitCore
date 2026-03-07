@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-03-07
+
+### Changed
+- Stream-backed writer paths optimized with buffered UTF-8 output and direct UTF-8 formatting for common invariant built-in types.
+- README benchmark summary updated for the latest `2026-03-07` full benchmark run with refreshed read/write numbers.
+
+### Performance
+- Full benchmark suite (`CsvReadWriteBenchmarks`, 38 benchmarks) rerun on `2026-03-07`.
+- Typed write (`RowCount=100000`) improved to:
+  - `CsvToolkitCore_WriteTyped_Stream`: `17.117 ms`, `16.05 MB`
+  - `CsvHelper_WriteTyped_Stream`: `22.847 ms`, `39.40 MB`
+  - `Sep_WriteTyped_Stream`: `12.028 ms`, `16.01 MB`
+- Typed write with converter options (`RowCount=100000`) improved to:
+  - `CsvToolkitCore_WriteTyped_WithConverterOptions_Stream`: `14.878 ms`, `8.04 MB`
+  - `CsvHelper_WriteTyped_WithConverterOptions_Stream`: `19.270 ms`, `26.60 MB`
+  - `Sep_WriteTyped_WithConverterOptions_Stream`: `7.409 ms`, `9.93 MB`
+
 ## [0.3.1] - 2026-03-07
 
 ### Added
