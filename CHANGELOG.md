@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-07
+
 ### Added
 - `Sep` benchmark coverage for common typed read/write scenarios in `benchmarks/CsvToolkit.Benchmarks`.
 
@@ -12,6 +14,24 @@ All notable changes to this project are documented in this file.
 - Tracked benchmark snapshots updated under `docs/benchmarks/`:
   - `docs/benchmarks/CsvReadWriteBenchmarks-2026-03-07.md`
   - `docs/benchmarks/CsvReadWriteBenchmarks-2026-03-07.csv`
+- Parser hot paths optimized with single-delimiter fast paths, buffered scanning, and reduced delimiter fallback overhead.
+- Typed read and typed write paths optimized with cached built-in materializers and writer fast paths.
+- Converter-options writer paths optimized for common built-in types, with matching async write fast paths.
+
+### Performance
+- Full benchmark suite (`CsvReadWriteBenchmarks`, 38 benchmarks) run on `2026-03-07`.
+- Typed read (`RowCount=100000`) improved to:
+  - `CsvToolkitCore_ReadTyped_Stream`: `30.194 ms`, `9.30 MB`
+  - `CsvHelper_ReadTyped_Stream`: `45.406 ms`, `36.72 MB`
+  - `Sep_ReadTyped_Stream`: `21.504 ms`, `9.23 MB`
+- Typed write (`RowCount=100000`) improved to:
+  - `CsvToolkitCore_WriteTyped_Stream`: `21.855 ms`, `16.06 MB`
+  - `CsvHelper_WriteTyped_Stream`: `23.322 ms`, `39.40 MB`
+  - `Sep_WriteTyped_Stream`: `11.695 ms`, `16.01 MB`
+- Typed write with converter options (`RowCount=100000`) improved to:
+  - `CsvToolkitCore_WriteTyped_WithConverterOptions_Stream`: `17.481 ms`, `8.05 MB`
+  - `CsvHelper_WriteTyped_WithConverterOptions_Stream`: `19.591 ms`, `26.60 MB`
+  - `Sep_WriteTyped_WithConverterOptions_Stream`: `7.270 ms`, `9.93 MB`
 
 ## [0.3.0] - 2026-03-04
 
