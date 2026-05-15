@@ -1575,57 +1575,73 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         }
     }
 
-    private ValueTask WriteFormattedInt32Async(int value, CsvTypeConverterOptions? converterOptions,
+    private async ValueTask WriteFormattedInt32Async(int value, CsvTypeConverterOptions? converterOptions,
         CancellationToken cancellationToken)
     {
         var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
         var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
-        char[]? rented = null;
+        var rented = ArrayPool<char>.Shared.Rent(32);
         try
         {
-            rented = new char[32];
             if (value.TryFormat(rented, out var written, format, culture))
             {
-                return WriteFieldCoreAsync(rented.AsMemory(0, written), cancellationToken);
+                await WriteFieldCoreAsync(rented.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
+                return;
             }
+
+            await WriteFieldCoreAsync(value.ToString(format, culture).AsMemory(), cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
-            if (rented is not null)
+            ArrayPool<char>.Shared.Return(rented);
+        }
+    }
+
+    private async ValueTask WriteFormattedDecimalAsync(decimal value, CsvTypeConverterOptions? converterOptions,
+        CancellationToken cancellationToken)
+    {
+        var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
+        var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
+        var rented = ArrayPool<char>.Shared.Rent(64);
+        try
+        {
+            if (value.TryFormat(rented, out var written, format, culture))
             {
-                // no-op, array was temporary and not pooled
+                await WriteFieldCoreAsync(rented.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
+                return;
             }
-        }
 
-        return WriteFieldCoreAsync(value.ToString(format, culture).AsMemory(), cancellationToken);
+            await WriteFieldCoreAsync(value.ToString(format, culture).AsMemory(), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(rented);
+        }
     }
 
-    private ValueTask WriteFormattedDecimalAsync(decimal value, CsvTypeConverterOptions? converterOptions,
+    private async ValueTask WriteFormattedDateTimeAsync(DateTime value, CsvTypeConverterOptions? converterOptions,
         CancellationToken cancellationToken)
     {
         var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
         var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
-        var buffer = new char[64];
-        if (value.TryFormat(buffer, out var written, format, culture))
+        var rented = ArrayPool<char>.Shared.Rent(128);
+        try
         {
-            return WriteFieldCoreAsync(buffer.AsMemory(0, written), cancellationToken);
+            if (value.TryFormat(rented, out var written, format, culture))
+            {
+                await WriteFieldCoreAsync(rented.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteFieldCoreAsync(value.ToString(format, culture).AsMemory(), cancellationToken)
+                .ConfigureAwait(false);
         }
-
-        return WriteFieldCoreAsync(value.ToString(format, culture).AsMemory(), cancellationToken);
-    }
-
-    private ValueTask WriteFormattedDateTimeAsync(DateTime value, CsvTypeConverterOptions? converterOptions,
-        CancellationToken cancellationToken)
-    {
-        var culture = converterOptions?.CultureInfo ?? Options.CultureInfo;
-        var format = converterOptions is { Formats.Count: > 0 } ? converterOptions.Formats[0] : null;
-        var buffer = new char[128];
-        if (value.TryFormat(buffer, out var written, format, culture))
+        finally
         {
-            return WriteFieldCoreAsync(buffer.AsMemory(0, written), cancellationToken);
+            ArrayPool<char>.Shared.Return(rented);
         }
-
-        return WriteFieldCoreAsync(value.ToString(format, culture).AsMemory(), cancellationToken);
     }
 
     private ValueTask WriteNullTokenOrEmptyAsync(CsvTypeConverterOptions? converterOptions,

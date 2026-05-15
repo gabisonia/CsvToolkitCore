@@ -98,6 +98,27 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    public async Task<int> CsvToolkitCore_ReadTypedAsync_Stream()
+    {
+        await using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
+        await using var reader = new CsvReader(stream, new CsvOptions
+        {
+            HasHeader = true,
+            DetectColumnCount = true,
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        var count = 0;
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            _ = reader.GetRecord<BenchmarkRecord>();
+            count++;
+        }
+
+        return count;
+    }
+
+    [Benchmark]
     public int CsvHelper_ReadTyped_Stream()
     {
         using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
@@ -209,6 +230,27 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    public async Task<long> CsvToolkitCore_WriteTypedAsync_Stream()
+    {
+        await using var stream = new MemoryStream();
+        await using var writer = new CsvWriter(stream, new CsvOptions
+        {
+            HasHeader = true,
+            NewLine = "\n",
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        await writer.WriteHeaderAsync<BenchmarkRecord>().ConfigureAwait(false);
+        foreach (var record in _records)
+        {
+            await writer.WriteRecordAsync(record).ConfigureAwait(false);
+        }
+
+        await writer.FlushAsync().ConfigureAwait(false);
+        return stream.Length;
+    }
+
+    [Benchmark]
     public long CsvHelper_WriteTyped_Stream()
     {
         using var stream = new MemoryStream();
@@ -267,6 +309,27 @@ public class CsvReadWriteBenchmarks
         var count = 0;
         while (reader.TryReadRecord<BenchmarkRecord>(out _))
         {
+            count++;
+        }
+
+        return count;
+    }
+
+    [Benchmark]
+    public async Task<int> CsvToolkitCore_ReadTypedAsync_SemicolonHighQuote()
+    {
+        await using var stream = new MemoryStream(_csvSemicolonQuotedUtf8, writable: false);
+        await using var reader = new CsvReader(stream, new CsvOptions
+        {
+            Delimiter = ';',
+            HasHeader = true,
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        var count = 0;
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            _ = reader.GetRecord<BenchmarkRecord>();
             count++;
         }
 
@@ -339,6 +402,30 @@ public class CsvReadWriteBenchmarks
         var count = 0;
         while (reader.TryReadRecord<ConverterOptionsRecord>(out _))
         {
+            count++;
+        }
+
+        return count;
+    }
+
+    [Benchmark]
+    public async Task<int> CsvToolkitCore_ReadTypedAsync_WithConverterOptions_Stream()
+    {
+        await using var stream = new MemoryStream(_csvConverterOptionsUtf8, writable: false);
+        var options = new CsvOptions
+        {
+            HasHeader = true,
+            CultureInfo = CultureInfo.InvariantCulture
+        };
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("Y").AddFalseValues("N"));
+        options.ConverterOptions.Configure<DateTime>(o => o.AddFormats("dd-MM-yyyy"));
+        options.ConverterOptions.Configure<int?>(o => o.AddNullValues("NULL"));
+        await using var reader = new CsvReader(stream, options);
+
+        var count = 0;
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            _ = reader.GetRecord<ConverterOptionsRecord>();
             count++;
         }
 
@@ -425,6 +512,31 @@ public class CsvReadWriteBenchmarks
         }
 
         writer.Flush();
+        return stream.Length;
+    }
+
+    [Benchmark]
+    public async Task<long> CsvToolkitCore_WriteTypedAsync_WithConverterOptions_Stream()
+    {
+        await using var stream = new MemoryStream();
+        var options = new CsvOptions
+        {
+            HasHeader = true,
+            NewLine = "\n",
+            CultureInfo = CultureInfo.InvariantCulture
+        };
+        options.ConverterOptions.Configure<bool>(o => o.AddTrueValues("Y").AddFalseValues("N"));
+        options.ConverterOptions.Configure<DateTime>(o => o.AddFormats("dd-MM-yyyy"));
+        options.ConverterOptions.Configure<int?>(o => o.AddNullValues("NULL"));
+        await using var writer = new CsvWriter(stream, options);
+
+        await writer.WriteHeaderAsync<ConverterOptionsRecord>().ConfigureAwait(false);
+        foreach (var record in _converterRecords)
+        {
+            await writer.WriteRecordAsync(record).ConfigureAwait(false);
+        }
+
+        await writer.FlushAsync().ConfigureAwait(false);
         return stream.Length;
     }
 

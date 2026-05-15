@@ -20,13 +20,17 @@ internal sealed class TextReaderInput(TextReader reader, bool leaveOpen) : ICsvC
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (!leaveOpen)
         {
+            if (reader is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                return;
+            }
+
             reader.Dispose();
         }
-
-        return default;
     }
 }

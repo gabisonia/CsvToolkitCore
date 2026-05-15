@@ -154,6 +154,12 @@ Run focused benchmark:
 dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks.CsvToolkitCore_ReadTyped_Stream*"
 ```
 
+Run async stream-focused benchmarks:
+
+```bash
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks.CsvToolkitCore_*Async*"
+```
+
 ## Practical Guidance
 
 - Use `CsvReader.TryReadRow` + `GetFieldSpan` for lowest allocation.

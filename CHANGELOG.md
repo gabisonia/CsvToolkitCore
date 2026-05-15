@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-15
+
+### Fixed
+- Stream-backed `CsvWriter` disposal now flushes buffered UTF-8 bytes before returning pooled buffers, preventing data loss when callers dispose without an explicit `Flush`.
+- Async disposal for text-backed reader/writer wrappers now uses `IAsyncDisposable` when available, falling back to synchronous disposal only when required by the underlying `TextReader` or `TextWriter`.
+
+### Changed
+- Async single-delimiter parsing now uses the buffered span-scanning fast path before falling back to async reads.
+- Async writer formatting for built-in numeric and date/time values now uses pooled buffers instead of allocating a new char array per field.
+- Benchmark coverage now includes async stream read/write scenarios for default, converter-options, and high-quote workloads.
+
 ## [0.3.2] - 2026-03-07
 
 ### Changed

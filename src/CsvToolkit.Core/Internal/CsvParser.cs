@@ -821,6 +821,161 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
         while (true)
         {
+            if (_pushbackCount == 0 && TryProcessBufferedSingleDelimiterCharacters(
+                    delimiter,
+                    quote,
+                    escape,
+                    trimStartEnabled,
+                    hasDistinctEscape,
+                    ref inQuotes,
+                    ref afterClosingQuote,
+                    ref consumedAnything,
+                    out var bufferedCharacter))
+            {
+                var bufferedCh = bufferedCharacter;
+
+                if (inQuotes)
+                {
+                    if (hasDistinctEscape && bufferedCh == escape)
+                    {
+                        var escaped = await ReadCharAsync(cancellationToken).ConfigureAwait(false);
+
+                        if (escaped == quote)
+                        {
+                            _rowBuffer.Append(quote);
+                            continue;
+                        }
+
+                        if (escaped >= 0)
+                        {
+                            PushBack(escaped);
+                        }
+
+                        _rowBuffer.Append(bufferedCh);
+                        continue;
+                    }
+
+                    if (bufferedCh == quote)
+                    {
+                        var next = await ReadCharAsync(cancellationToken).ConfigureAwait(false);
+
+                        if (next == quote)
+                        {
+                            _rowBuffer.Append(quote);
+                            continue;
+                        }
+
+                        inQuotes = false;
+                        afterClosingQuote = true;
+
+                        if (next >= 0)
+                        {
+                            PushBack(next);
+                        }
+
+                        continue;
+                    }
+
+                    if (await TryAppendQuotedNewLineAsync(bufferedCh, cancellationToken).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    _rowBuffer.Append(bufferedCh);
+                    continue;
+                }
+
+                if (afterClosingQuote)
+                {
+                    if (bufferedCh == delimiter)
+                    {
+                        _rowBuffer.CompleteField(true, trimOptions);
+                        fieldWasQuoted = false;
+                        afterClosingQuote = false;
+                        continue;
+                    }
+
+                    if (bufferedCh == '\r' || bufferedCh == '\n')
+                    {
+                        await ConsumeNewLineSuffixAsync(bufferedCh, cancellationToken).ConfigureAwait(false);
+                        _rowBuffer.CompleteField(true, trimOptions);
+                        if (ignoreBlankLines && _rowBuffer.IsBlankLine())
+                        {
+                            ResetRowState(ref consumedAnything, ref inQuotes, ref afterClosingQuote, ref fieldWasQuoted);
+                            rowStartLine = LineNumber;
+                            continue;
+                        }
+
+                        CurrentRow = _rowBuffer.ToRow(RowIndex, rowStartLine);
+                        RowIndex++;
+                        return true;
+                    }
+
+                    if (char.IsWhiteSpace(bufferedCh))
+                    {
+                        continue;
+                    }
+
+                    HandleBadData(
+                        _rowBuffer.FieldCount,
+                        "Unexpected character after closing quote.",
+                        _rowBuffer.CurrentFieldMemory);
+
+                    afterClosingQuote = false;
+                    _rowBuffer.Append(bufferedCh);
+                    continue;
+                }
+
+                if (bufferedCh == delimiter)
+                {
+                    _rowBuffer.CompleteField(fieldWasQuoted, trimOptions);
+                    fieldWasQuoted = false;
+                    continue;
+                }
+
+                if (bufferedCh == quote)
+                {
+                    if (_rowBuffer.CurrentFieldLength == 0)
+                    {
+                        inQuotes = true;
+                        fieldWasQuoted = true;
+                        continue;
+                    }
+
+                    HandleBadData(
+                        _rowBuffer.FieldCount,
+                        "Unexpected quote in unquoted field.",
+                        _rowBuffer.CurrentFieldMemory);
+
+                    _rowBuffer.Append(bufferedCh);
+                    continue;
+                }
+
+                if (bufferedCh == '\r' || bufferedCh == '\n')
+                {
+                    await ConsumeNewLineSuffixAsync(bufferedCh, cancellationToken).ConfigureAwait(false);
+                    _rowBuffer.CompleteField(fieldWasQuoted, trimOptions);
+                    if (ignoreBlankLines && _rowBuffer.IsBlankLine())
+                    {
+                        ResetRowState(ref consumedAnything, ref inQuotes, ref afterClosingQuote, ref fieldWasQuoted);
+                        rowStartLine = LineNumber;
+                        continue;
+                    }
+
+                    CurrentRow = _rowBuffer.ToRow(RowIndex, rowStartLine);
+                    RowIndex++;
+                    return true;
+                }
+
+                if (_rowBuffer.CurrentFieldLength == 0 && trimStartEnabled && char.IsWhiteSpace(bufferedCh))
+                {
+                    continue;
+                }
+
+                _rowBuffer.Append(bufferedCh);
+                continue;
+            }
+
             var code = await ReadCharAsync(cancellationToken).ConfigureAwait(false);
 
             if (code < 0)

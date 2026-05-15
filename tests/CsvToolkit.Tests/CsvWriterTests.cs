@@ -333,6 +333,46 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void StreamOutput_DisposeFlushesBufferedBytes()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        using var stream = new MemoryStream();
+
+        // Act
+        using (var writer = new CsvWriter(stream, options, leaveOpen: true))
+        {
+            writer.WriteField("Ada");
+            writer.NextRecord();
+        }
+
+        var csv = Encoding.UTF8.GetString(stream.ToArray());
+
+        // Assert
+        Assert.Equal("Ada\n", csv);
+    }
+
+    [Fact]
+    public async Task StreamOutput_DisposeAsyncFlushesBufferedBytes()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        await using var stream = new MemoryStream();
+
+        // Act
+        await using (var writer = new CsvWriter(stream, options, leaveOpen: true))
+        {
+            await writer.WriteFieldAsync("Ada".AsMemory());
+            await writer.NextRecordAsync();
+        }
+
+        var csv = Encoding.UTF8.GetString(stream.ToArray());
+
+        // Assert
+        Assert.Equal("Ada\n", csv);
+    }
+
+    [Fact]
     public async Task StreamWriteAndReadAsync_RoundTrips()
     {
         // Arrange

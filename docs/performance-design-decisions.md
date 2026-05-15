@@ -23,8 +23,10 @@ Benchmarks live in `benchmarks/CsvToolkit.Benchmarks/CsvReadWriteBenchmarks.cs` 
 - Dataset size: `100_000` rows
 - Workloads:
   - Typed read from UTF-8 stream
+  - Async typed read from UTF-8 stream
   - Dictionary/dynamic read
   - Typed write to stream
+  - Async typed write to stream
   - Semicolon + high quoting read stress case
 - Baseline library: `CsvHelper`
 
@@ -154,7 +156,7 @@ Why it helps:
 
 Tradeoff:
 
-- Async generic write path may still materialize temporary strings for formatted values.
+- Custom converters and unsupported format paths may still materialize temporary strings.
 
 ### 8. Small hot-method inlining and local option hoisting
 

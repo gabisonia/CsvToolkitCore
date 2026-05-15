@@ -31,13 +31,17 @@ internal sealed class TextWriterOutput(TextWriter writer, bool leaveOpen) : ICsv
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (!leaveOpen)
         {
+            if (writer is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                return;
+            }
+
             writer.Dispose();
         }
-
-        return default;
     }
 }

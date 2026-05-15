@@ -206,6 +206,7 @@ Benchmarks compare `CsvToolkit.Core` with `CsvHelper` and `Sep` for:
 
 - Typed read/write (default mapping)
 - Typed read/write with converter options
+- Async typed read/write for stream-backed APIs
 - Typed read with duplicate headers (`NameIndex`)
 - Dictionary/dynamic read
 - Semicolon + high quoting parse
@@ -228,6 +229,12 @@ Run one benchmark (faster while iterating):
 
 ```bash
 dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks.CsvToolkitCore_ReadTyped_Stream*"
+```
+
+Run the async stream-focused benchmarks:
+
+```bash
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks.CsvToolkitCore_*Async*"
 ```
 
 Run from IDE:

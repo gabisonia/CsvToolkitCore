@@ -129,6 +129,7 @@ internal sealed class Utf8StreamOutput(Stream stream, int byteBufferSize, bool l
     public void Dispose()
     {
         FlushEncoder();
+        FlushBuffer();
         ArrayPool<byte>.Shared.Return(_byteBuffer);
         if (!leaveOpen)
         {
@@ -139,6 +140,7 @@ internal sealed class Utf8StreamOutput(Stream stream, int byteBufferSize, bool l
     public async ValueTask DisposeAsync()
     {
         await FlushEncoderAsync(CancellationToken.None).ConfigureAwait(false);
+        await FlushBufferAsync(CancellationToken.None).ConfigureAwait(false);
         ArrayPool<byte>.Shared.Return(_byteBuffer);
         if (!leaveOpen)
         {
