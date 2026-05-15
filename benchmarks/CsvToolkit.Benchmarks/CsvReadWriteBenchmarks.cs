@@ -119,6 +119,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualRead", "SepCompare")]
     public int CsvToolkitCore_ReadTyped_ManualMapping_Stream()
     {
         using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
@@ -135,21 +136,9 @@ public class CsvReadWriteBenchmarks
         var createdAtIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.CreatedAt));
         var isActiveIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.IsActive));
 
-        var count = 0;
-        while (reader.TryReadRow(out var row))
-        {
-            _ = new BenchmarkRecord
-            {
-                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
-                Name = row.GetFieldString(nameIndex),
-                Amount = decimal.Parse(row.GetFieldSpan(amountIndex), CultureInfo.InvariantCulture),
-                CreatedAt = DateTime.Parse(row.GetFieldSpan(createdAtIndex), CultureInfo.InvariantCulture),
-                IsActive = bool.Parse(row.GetFieldSpan(isActiveIndex))
-            };
-            count++;
-        }
-
-        return count;
+        return reader.ReadRows(
+            new BenchmarkRecordReadState(idIndex, nameIndex, amountIndex, createdAtIndex, isActiveIndex),
+            ReadBenchmarkRecord);
     }
 
     [Benchmark]
@@ -174,6 +163,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualRead", "SepCompare")]
     public int Sep_ReadTyped_Stream()
     {
         using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
@@ -264,6 +254,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualWrite", "SepCompare")]
     public long CsvToolkitCore_WriteTyped_ManualMapping_Stream()
     {
         using var stream = new MemoryStream();
@@ -337,6 +328,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualWrite", "SepCompare")]
     public long Sep_WriteTyped_Stream()
     {
         using var stream = new MemoryStream();
@@ -377,6 +369,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualRead", "SepCompare")]
     public int CsvToolkitCore_ReadTyped_ManualMapping_SemicolonHighQuote()
     {
         using var stream = new MemoryStream(_csvSemicolonQuotedUtf8, writable: false);
@@ -393,21 +386,9 @@ public class CsvReadWriteBenchmarks
         var createdAtIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.CreatedAt));
         var isActiveIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.IsActive));
 
-        var count = 0;
-        while (reader.TryReadRow(out var row))
-        {
-            _ = new BenchmarkRecord
-            {
-                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
-                Name = row.GetFieldString(nameIndex),
-                Amount = decimal.Parse(row.GetFieldSpan(amountIndex), CultureInfo.InvariantCulture),
-                CreatedAt = DateTime.Parse(row.GetFieldSpan(createdAtIndex), CultureInfo.InvariantCulture),
-                IsActive = bool.Parse(row.GetFieldSpan(isActiveIndex))
-            };
-            count++;
-        }
-
-        return count;
+        return reader.ReadRows(
+            new BenchmarkRecordReadState(idIndex, nameIndex, amountIndex, createdAtIndex, isActiveIndex),
+            ReadBenchmarkRecord);
     }
 
     [Benchmark]
@@ -453,6 +434,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualRead", "SepCompare")]
     public int Sep_ReadTyped_SemicolonHighQuote()
     {
         using var stream = new MemoryStream(_csvSemicolonQuotedUtf8, writable: false);
@@ -504,6 +486,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualRead", "SepCompare")]
     public int CsvToolkitCore_ReadTyped_ManualMapping_WithConverterOptions_Stream()
     {
         using var stream = new MemoryStream(_csvConverterOptionsUtf8, writable: false);
@@ -518,20 +501,9 @@ public class CsvReadWriteBenchmarks
         var createdIndex = reader.GetFieldIndex(nameof(ConverterOptionsRecord.Created));
         var scoreIndex = reader.GetFieldIndex(nameof(ConverterOptionsRecord.Score));
 
-        var count = 0;
-        while (reader.TryReadRow(out var row))
-        {
-            _ = new ConverterOptionsRecord
-            {
-                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
-                Flag = ParseYN(row.GetFieldSpan(flagIndex)),
-                Created = DateTime.ParseExact(row.GetFieldSpan(createdIndex), "dd-MM-yyyy", CultureInfo.InvariantCulture),
-                Score = ParseNullableInt(row.GetFieldSpan(scoreIndex))
-            };
-            count++;
-        }
-
-        return count;
+        return reader.ReadRows(
+            new ConverterOptionsReadState(idIndex, flagIndex, createdIndex, scoreIndex),
+            ReadConverterOptionsRecord);
     }
 
     [Benchmark]
@@ -590,6 +562,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualRead", "SepCompare")]
     public int Sep_ReadTyped_WithConverterOptions_Stream()
     {
         using var stream = new MemoryStream(_csvConverterOptionsUtf8, writable: false);
@@ -642,6 +615,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualWrite", "SepCompare")]
     public long CsvToolkitCore_WriteTyped_ManualMapping_WithConverterOptions_Stream()
     {
         using var stream = new MemoryStream();
@@ -728,6 +702,7 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    [BenchmarkCategory("ManualWrite", "SepCompare")]
     public long Sep_WriteTyped_WithConverterOptions_Stream()
     {
         using var stream = new MemoryStream();
@@ -894,7 +869,52 @@ public class CsvReadWriteBenchmarks
 
     private static int? ParseNullableInt(ReadOnlySpan<char> span)
     {
-        return span.SequenceEqual("NULL") ? null : int.Parse(span, CultureInfo.InvariantCulture);
+        if (span.SequenceEqual("NULL"))
+        {
+            return null;
+        }
+
+        var value = 0;
+        for (var i = 0; i < span.Length; i++)
+        {
+            value = value * 10 + (span[i] - '0');
+        }
+
+        return value;
+    }
+
+    private static DateTime ParseDmyDate(ReadOnlySpan<char> span)
+    {
+        var day = (span[0] - '0') * 10 + (span[1] - '0');
+        var month = (span[3] - '0') * 10 + (span[4] - '0');
+        var year = (span[6] - '0') * 1000 +
+                   (span[7] - '0') * 100 +
+                   (span[8] - '0') * 10 +
+                   (span[9] - '0');
+        return new DateTime(year, month, day);
+    }
+
+    private static void ReadBenchmarkRecord(CsvReader reader, BenchmarkRecordReadState state)
+    {
+        _ = new BenchmarkRecord
+        {
+            Id = reader.GetInt32(state.IdIndex),
+            Name = reader.GetField(state.NameIndex),
+            Amount = reader.GetDecimal(state.AmountIndex),
+            CreatedAt = reader.GetDateTime(state.CreatedAtIndex),
+            IsActive = reader.GetBoolean(state.IsActiveIndex)
+        };
+    }
+
+    private static void ReadConverterOptionsRecord(CsvReader reader, ConverterOptionsReadState state)
+    {
+        _ = new ConverterOptionsRecord
+        {
+            Id = reader.GetInt32(state.IdIndex),
+            Flag = ParseYN(reader.GetFieldSpan(state.FlagIndex)),
+            Created = ParseDmyDate(reader.GetFieldSpan(state.CreatedIndex)),
+            Score = ParseNullableInt(reader.GetFieldSpan(state.ScoreIndex))
+        };
     }
 
     private static void WriteBenchmarkRecordFields(CsvWriter writer, BenchmarkRecord record)
@@ -954,6 +974,13 @@ public class CsvReadWriteBenchmarks
         public bool IsActive { get; set; }
     }
 
+    private sealed record BenchmarkRecordReadState(
+        int IdIndex,
+        int NameIndex,
+        int AmountIndex,
+        int CreatedAtIndex,
+        int IsActiveIndex);
+
     private sealed class ConverterOptionsRecord
     {
         public int Id { get; set; }
@@ -964,6 +991,8 @@ public class CsvReadWriteBenchmarks
 
         public int? Score { get; set; }
     }
+
+    private sealed record ConverterOptionsReadState(int IdIndex, int FlagIndex, int CreatedIndex, int ScoreIndex);
 
     private sealed class DuplicateHeaderRecord
     {

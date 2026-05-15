@@ -253,6 +253,11 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
     private bool TryReadRowCoreSingleDelimiter(char delimiter)
     {
+        if (TryReadBufferedUnquotedRowSingleDelimiter(delimiter, out var read))
+        {
+            return read;
+        }
+
         _rowBuffer.Reset();
 
         var quote = options.Quote;
@@ -596,6 +601,91 @@ internal sealed class CsvParser(ICsvCharInput input, CsvOptions options) : IDisp
 
             _rowBuffer.Append(ch);
         }
+    }
+
+    private bool TryReadBufferedUnquotedRowSingleDelimiter(char delimiter, out bool read)
+    {
+        read = false;
+
+        if (_pushbackCount != 0 || options.IgnoreBlankLines)
+        {
+            return false;
+        }
+
+        if (_readPosition >= _readLength)
+        {
+            _readLength = input.Read(_readBuffer.AsSpan());
+            _readPosition = 0;
+            if (_readLength == 0)
+            {
+                return true;
+            }
+        }
+
+        var quote = options.Quote;
+        var start = _readPosition;
+        var newlineIndex = -1;
+        var newlineChar = '\0';
+
+        for (var i = start; i < _readLength; i++)
+        {
+            var ch = _readBuffer[i];
+            if (ch == quote)
+            {
+                return false;
+            }
+
+            if (ch == '\r' || ch == '\n')
+            {
+                newlineIndex = i;
+                newlineChar = ch;
+                break;
+            }
+        }
+
+        if (newlineIndex < 0)
+        {
+            return false;
+        }
+
+        if (newlineChar == '\r' && newlineIndex + 1 == _readLength)
+        {
+            return false;
+        }
+
+        _rowBuffer.Reset();
+        var source = _readBuffer.AsSpan(0, _readLength);
+        var fieldStart = start;
+        for (var i = start; i < newlineIndex; i++)
+        {
+            if (_readBuffer[i] != delimiter)
+            {
+                continue;
+            }
+
+            _rowBuffer.CompleteInputBufferField(fieldStart, i - fieldStart, options.TrimOptions, source);
+            fieldStart = i + 1;
+        }
+
+        _rowBuffer.CompleteInputBufferField(fieldStart, newlineIndex - fieldStart, options.TrimOptions, source);
+
+        var nextPosition = newlineIndex + 1;
+        if (newlineChar == '\r' && nextPosition < _readLength && _readBuffer[nextPosition] == '\n')
+        {
+            nextPosition++;
+            DetectedNewLine ??= "\r\n";
+        }
+        else
+        {
+            DetectedNewLine ??= newlineChar == '\r' ? "\r" : "\n";
+        }
+
+        _readPosition = nextPosition;
+        CurrentRow = _rowBuffer.ToRow(RowIndex, LineNumber, _readBuffer.AsMemory(0, _readLength));
+        RowIndex++;
+        LineNumber++;
+        read = true;
+        return true;
     }
 
     private async ValueTask<bool> TryReadRowCoreAsync(CancellationToken cancellationToken)

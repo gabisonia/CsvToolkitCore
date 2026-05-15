@@ -84,7 +84,8 @@ Code:
 
 Why it helps:
 
-- Row text is stored once in a pooled char buffer.
+- Row text is stored once in a pooled char buffer when fields need unescaping or span assembly.
+- Simple unquoted buffered rows can store field tokens over the input buffer and avoid copying row text.
 - Fields are represented by `(start, length, wasQuoted)` metadata, not copied strings.
 - `GetFieldSpan` / `GetFieldMemory` can return direct slices without allocating strings.
 - `GetFieldIndex(...)` lets hot loops resolve header names once and use ordinal field access per row.
@@ -218,18 +219,20 @@ Code: `src/CsvToolkit.Core/CsvOptions.cs`
 
 ## Manual Mapping Guidance
 
-For Sep-style throughput benchmarks and hot ingestion paths, resolve headers once and parse from spans:
+For Sep-style throughput benchmarks and hot ingestion paths, resolve headers once and use typed manual getters:
 
 ```csharp
 var idIndex = reader.GetFieldIndex("id");
 var nameIndex = reader.GetFieldIndex("name");
 
-while (reader.TryReadRow(out var row))
+reader.ReadRows((IdIndex: idIndex, NameIndex: nameIndex), static (csv, state) =>
 {
-    var id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture);
-    var name = row.GetFieldSpan(nameIndex);
-}
+    var id = csv.GetInt32(state.IdIndex);
+    var name = csv.GetField(state.NameIndex);
+});
 ```
+
+Use `CsvRow.GetFieldSpan(index)` when custom span parsing or span-only string inspection is needed.
 
 For manual writes, format primitives into stack buffers and pass spans to the writer:
 

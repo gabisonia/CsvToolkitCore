@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-15
+
+### Added
+- Added typed manual field getters for high-throughput row access: `GetInt32`, `GetDecimal`, `GetDateTime`, `GetBoolean`, and nullable variants.
+- Added `ReadRows<TState>(...)` for projection-style manual reads with caller-owned state and static delegates.
+
+### Changed
+- Optimized simple unquoted single-delimiter reads with input-buffer field tokens to avoid copying row text into the row buffer.
+- Added invariant fast parsers for common manual-read values: `int`, simple decimal, `true`/`false`, and roundtrip UTC `DateTime`.
+- Updated focused manual mapping benchmarks and API documentation for the new Seq/Sep-style read path.
+
+### Performance
+- Focused manual read benchmarks now beat `Sep` in `6/6` read scenarios.
+- At `100,000` rows:
+  - Default manual read: `14.190 ms` vs `21.938 ms` for `Sep`
+  - Semicolon/high-quote manual read: `15.873 ms` vs `25.877 ms` for `Sep`
+  - Converter-options manual read: `7.179 ms` vs `11.648 ms` for `Sep`
+
 ## [0.3.3] - 2026-05-15
 
 ### Fixed

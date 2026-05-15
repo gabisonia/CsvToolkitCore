@@ -140,6 +140,23 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         return TryReadRow(out _);
     }
 
+    public int ReadRows<TState>(TState state, CsvRowAction<TState> rowAction)
+    {
+        if (rowAction is null)
+        {
+            throw new ArgumentNullException(nameof(rowAction));
+        }
+
+        var count = 0;
+        while (TryReadRow(out _))
+        {
+            rowAction(this, state);
+            count++;
+        }
+
+        return count;
+    }
+
     public async ValueTask<bool> ReadAsync(CancellationToken cancellationToken = default)
     {
         await EnsureHeaderInitializedAsync(cancellationToken).ConfigureAwait(false);
@@ -199,6 +216,142 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     {
         var index = ResolveHeaderIndex(name, nameIndex);
         return GetField<TField>(index);
+    }
+
+    public int GetInt32(int index)
+    {
+        if (TryGetInt32FieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, nameof(Int32));
+        return default;
+    }
+
+    public int GetInt32(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetInt32(index);
+    }
+
+    public int? GetNullableInt32(int index)
+    {
+        if (TryGetNullableInt32FieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, $"{nameof(Int32)}?");
+        return default;
+    }
+
+    public int? GetNullableInt32(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetNullableInt32(index);
+    }
+
+    public decimal GetDecimal(int index)
+    {
+        if (TryGetDecimalFieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, nameof(Decimal));
+        return default;
+    }
+
+    public decimal GetDecimal(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetDecimal(index);
+    }
+
+    public decimal? GetNullableDecimal(int index)
+    {
+        if (TryGetNullableDecimalFieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, $"{nameof(Decimal)}?");
+        return default;
+    }
+
+    public decimal? GetNullableDecimal(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetNullableDecimal(index);
+    }
+
+    public DateTime GetDateTime(int index)
+    {
+        if (TryGetDateTimeFieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, nameof(DateTime));
+        return default;
+    }
+
+    public DateTime GetDateTime(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetDateTime(index);
+    }
+
+    public DateTime? GetNullableDateTime(int index)
+    {
+        if (TryGetNullableDateTimeFieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, $"{nameof(DateTime)}?");
+        return default;
+    }
+
+    public DateTime? GetNullableDateTime(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetNullableDateTime(index);
+    }
+
+    public bool GetBoolean(int index)
+    {
+        if (TryGetBooleanFieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, nameof(Boolean));
+        return default;
+    }
+
+    public bool GetBoolean(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetBoolean(index);
+    }
+
+    public bool? GetNullableBoolean(int index)
+    {
+        if (TryGetNullableBooleanFieldValue(index, out var value))
+        {
+            return value;
+        }
+
+        HandleFieldConversionFailure(index, $"{nameof(Boolean)}?");
+        return default;
+    }
+
+    public bool? GetNullableBoolean(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetNullableBoolean(index);
     }
 
     public bool TryReadDictionary([NotNullWhen(true)] out Dictionary<string, string?>? row)
@@ -867,7 +1020,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        value = CurrentRow.GetFieldString(fieldIndex);
+        value = CurrentRow.GetFieldMemoryUnchecked(fieldIndex).ToString();
         return true;
     }
 
@@ -879,7 +1032,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        return int.TryParse(CurrentRow.GetFieldSpan(fieldIndex), NumberStyles.Integer, Options.CultureInfo, out value);
+        return TryParseInt32BuiltIn(CurrentRow.GetFieldSpanUnchecked(fieldIndex), Options.CultureInfo, out value);
     }
 
     private bool TryGetNullableInt32FieldValue(int fieldIndex, out int? value)
@@ -890,14 +1043,14 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        var source = CurrentRow.GetFieldSpan(fieldIndex);
+        var source = CurrentRow.GetFieldSpanUnchecked(fieldIndex);
         if (source.Length == 0)
         {
             value = null;
             return true;
         }
 
-        if (int.TryParse(source, NumberStyles.Integer, Options.CultureInfo, out var parsed))
+        if (TryParseInt32BuiltIn(source, Options.CultureInfo, out var parsed))
         {
             value = parsed;
             return true;
@@ -915,8 +1068,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        return decimal.TryParse(CurrentRow.GetFieldSpan(fieldIndex), NumberStyles.Number, Options.CultureInfo,
-            out value);
+        return TryParseDecimalBuiltIn(CurrentRow.GetFieldSpanUnchecked(fieldIndex), Options.CultureInfo, out value);
     }
 
     private bool TryGetNullableDecimalFieldValue(int fieldIndex, out decimal? value)
@@ -927,14 +1079,14 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        var source = CurrentRow.GetFieldSpan(fieldIndex);
+        var source = CurrentRow.GetFieldSpanUnchecked(fieldIndex);
         if (source.Length == 0)
         {
             value = null;
             return true;
         }
 
-        if (decimal.TryParse(source, NumberStyles.Number, Options.CultureInfo, out var parsed))
+        if (TryParseDecimalBuiltIn(source, Options.CultureInfo, out var parsed))
         {
             value = parsed;
             return true;
@@ -952,7 +1104,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        return TryParseDateTimeBuiltIn(CurrentRow.GetFieldSpan(fieldIndex), Options.CultureInfo, out value);
+        return TryParseDateTimeBuiltIn(CurrentRow.GetFieldSpanUnchecked(fieldIndex), Options.CultureInfo, out value);
     }
 
     private bool TryGetNullableDateTimeFieldValue(int fieldIndex, out DateTime? value)
@@ -963,7 +1115,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        var source = CurrentRow.GetFieldSpan(fieldIndex);
+        var source = CurrentRow.GetFieldSpanUnchecked(fieldIndex);
         if (source.Length == 0)
         {
             value = null;
@@ -988,7 +1140,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        return TryParseBooleanBuiltIn(CurrentRow.GetFieldSpan(fieldIndex), out value);
+        return TryParseBooleanBuiltIn(CurrentRow.GetFieldSpanUnchecked(fieldIndex), out value);
     }
 
     private bool TryGetNullableBooleanFieldValue(int fieldIndex, out bool? value)
@@ -999,7 +1151,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        var source = CurrentRow.GetFieldSpan(fieldIndex);
+        var source = CurrentRow.GetFieldSpanUnchecked(fieldIndex);
         if (source.Length == 0)
         {
             value = null;
@@ -1024,7 +1176,7 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             return false;
         }
 
-        var source = CurrentRow.GetFieldSpan(fieldIndex);
+        var source = CurrentRow.GetFieldSpanUnchecked(fieldIndex);
         var valueType = typeof(TValue);
         var nullableType = Nullable.GetUnderlyingType(valueType);
         var effectiveType = nullableType ?? valueType;
@@ -1054,14 +1206,14 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
         }
 
         if (effectiveType == typeof(int) &&
-            int.TryParse(source, NumberStyles.Integer, culture, out var intValue) &&
+            TryParseInt32BuiltIn(source, culture, out var intValue) &&
             TryAssignParsedValue(intValue, nullableType, out value))
         {
             return true;
         }
 
         if (effectiveType == typeof(decimal) &&
-            decimal.TryParse(source, NumberStyles.Number, culture, out var decimalValue) &&
+            TryParseDecimalBuiltIn(source, culture, out var decimalValue) &&
             TryAssignParsedValue(decimalValue, nullableType, out value))
         {
             return true;
@@ -1104,6 +1256,147 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParseInt32BuiltIn(ReadOnlySpan<char> source, CultureInfo culture, out int value)
+    {
+        if (ReferenceEquals(culture, CultureInfo.InvariantCulture) && TryParseInt32Invariant(source, out value))
+        {
+            return true;
+        }
+
+        return int.TryParse(source, NumberStyles.Integer, culture, out value);
+    }
+
+    private static bool TryParseInt32Invariant(ReadOnlySpan<char> source, out int value)
+    {
+        value = default;
+        if (source.Length == 0)
+        {
+            return false;
+        }
+
+        var index = 0;
+        var sign = 1;
+        if (source[0] == '-')
+        {
+            sign = -1;
+            index = 1;
+        }
+        else if (source[0] == '+')
+        {
+            index = 1;
+        }
+
+        if (index == source.Length)
+        {
+            return false;
+        }
+
+        var limit = sign < 0 ? 2147483648u : 2147483647u;
+        uint result = 0;
+        for (; index < source.Length; index++)
+        {
+            var digit = (uint)(source[index] - '0');
+            if (digit > 9 || result > (limit - digit) / 10)
+            {
+                value = default;
+                return false;
+            }
+
+            result = result * 10 + digit;
+        }
+
+        value = sign < 0 ? unchecked(-(int)result) : (int)result;
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool TryParseDecimalBuiltIn(ReadOnlySpan<char> source, CultureInfo culture, out decimal value)
+    {
+        if (ReferenceEquals(culture, CultureInfo.InvariantCulture) && TryParseDecimalInvariant(source, out value))
+        {
+            return true;
+        }
+
+        return decimal.TryParse(source, NumberStyles.Number, culture, out value);
+    }
+
+    private static bool TryParseDecimalInvariant(ReadOnlySpan<char> source, out decimal value)
+    {
+        value = default;
+        if (source.Length == 0)
+        {
+            return false;
+        }
+
+        var index = 0;
+        var negative = false;
+        if (source[0] == '-')
+        {
+            negative = true;
+            index = 1;
+        }
+        else if (source[0] == '+')
+        {
+            index = 1;
+        }
+
+        if (index == source.Length)
+        {
+            return false;
+        }
+
+        ulong result = 0;
+        var scale = 0;
+        var seenDecimalPoint = false;
+        var seenDigit = false;
+
+        for (; index < source.Length; index++)
+        {
+            var ch = source[index];
+            if (ch == '.')
+            {
+                if (seenDecimalPoint)
+                {
+                    return false;
+                }
+
+                seenDecimalPoint = true;
+                continue;
+            }
+
+            var digit = (uint)(ch - '0');
+            if (digit > 9)
+            {
+                return false;
+            }
+
+            if (result > (ulong.MaxValue - digit) / 10)
+            {
+                return false;
+            }
+
+            result = result * 10 + digit;
+            seenDigit = true;
+            if (seenDecimalPoint)
+            {
+                scale++;
+                if (scale > 28)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!seenDigit)
+        {
+            return false;
+        }
+
+        value = new decimal((int)result, (int)(result >> 32), 0, negative, (byte)scale);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryAssignParsedValue<TParsed, TValue>(TParsed parsed, Type? nullableType, out TValue value)
     {
         if (typeof(TValue) == typeof(TParsed))
@@ -1125,11 +1418,6 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool TryParseBooleanBuiltIn(ReadOnlySpan<char> source, out bool value)
     {
-        if (bool.TryParse(source, out value))
-        {
-            return true;
-        }
-
         if (source.Length == 1)
         {
             if (source[0] == '1')
@@ -1145,6 +1433,23 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
             }
         }
 
+        if (source.Equals("true".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            value = true;
+            return true;
+        }
+
+        if (source.Equals("false".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            value = false;
+            return true;
+        }
+
+        if (bool.TryParse(source, out value))
+        {
+            return true;
+        }
+
         value = false;
         return false;
     }
@@ -1153,13 +1458,71 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
     private static bool TryParseDateTimeBuiltIn(ReadOnlySpan<char> source, CultureInfo culture, out DateTime value)
     {
         if (ReferenceEquals(culture, CultureInfo.InvariantCulture) &&
-            DateTime.TryParseExact(source, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
-                out value))
+            (TryParseRoundtripUtcDateTime(source, out value) ||
+             DateTime.TryParseExact(source, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind,
+                 out value)))
         {
             return true;
         }
 
         return DateTime.TryParse(source, culture, DateTimeStyles.None, out value);
+    }
+
+    private static bool TryParseRoundtripUtcDateTime(ReadOnlySpan<char> source, out DateTime value)
+    {
+        value = default;
+        if (source.Length != 28 ||
+            source[4] != '-' ||
+            source[7] != '-' ||
+            source[10] != 'T' ||
+            source[13] != ':' ||
+            source[16] != ':' ||
+            source[19] != '.' ||
+            source[27] != 'Z')
+        {
+            return false;
+        }
+
+        if (!TryParseFixedDigits(source[..4], out var year) ||
+            !TryParseFixedDigits(source.Slice(5, 2), out var month) ||
+            !TryParseFixedDigits(source.Slice(8, 2), out var day) ||
+            !TryParseFixedDigits(source.Slice(11, 2), out var hour) ||
+            !TryParseFixedDigits(source.Slice(14, 2), out var minute) ||
+            !TryParseFixedDigits(source.Slice(17, 2), out var second) ||
+            !TryParseFixedDigits(source.Slice(20, 7), out var fraction))
+        {
+            return false;
+        }
+
+        try
+        {
+            value = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Utc)
+                .AddTicks(fraction);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            value = default;
+            return false;
+        }
+    }
+
+    private static bool TryParseFixedDigits(ReadOnlySpan<char> source, out int value)
+    {
+        value = 0;
+        for (var i = 0; i < source.Length; i++)
+        {
+            var digit = source[i] - '0';
+            if ((uint)digit > 9)
+            {
+                value = default;
+                return false;
+            }
+
+            value = value * 10 + digit;
+        }
+
+        return true;
     }
 
     private bool TryPopulateUsingSimpleReadPlan(CsvSimpleReadPlan plan, object target)
@@ -1586,6 +1949,14 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
         Options.BadDataFound?.Invoke(new CsvBadDataContext(CurrentRow.RowIndex, CurrentRow.LineNumber, fieldIndex,
             message, rawField));
+    }
+
+    private void HandleFieldConversionFailure(int fieldIndex, string targetType)
+    {
+        var rawField = (uint)fieldIndex < (uint)CurrentRow.FieldCount
+            ? CurrentRow.GetFieldMemory(fieldIndex)
+            : ReadOnlyMemory<char>.Empty;
+        HandleBadData(fieldIndex, $"Failed to convert field at index {fieldIndex} to {targetType}.", rawField);
     }
 
     private int ResolveHeaderIndex(string name, int nameIndex)

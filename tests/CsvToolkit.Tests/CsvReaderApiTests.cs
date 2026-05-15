@@ -104,6 +104,69 @@ public sealed class CsvReaderApiTests
     }
 
     [Fact]
+    public void ReadRows_WithPreResolvedIndexes_SupportsStaticProjection()
+    {
+        // Arrange
+        const string csv = "id,name\n1,Ada\n2,Bob\n";
+        using var reader = new CsvReader(new StringReader(csv));
+        var state = new ReadRowsState(reader.GetFieldIndex("id"), reader.GetFieldIndex("name"));
+
+        // Act
+        var count = reader.ReadRows(state, static (csvReader, readState) =>
+        {
+            readState.Records.Add(new ApiRecord
+            {
+                Id = csvReader.GetInt32(readState.IdIndex),
+                Name = csvReader.GetField(readState.NameIndex)
+            });
+        });
+
+        // Assert
+        Assert.Equal(2, count);
+        Assert.Equal(2, state.Records.Count);
+        Assert.Equal(1, state.Records[0].Id);
+        Assert.Equal("Ada", state.Records[0].Name);
+        Assert.Equal(2, state.Records[1].Id);
+        Assert.Equal("Bob", state.Records[1].Name);
+    }
+
+    [Fact]
+    public void TypedManualAccessors_ReadBuiltInValues()
+    {
+        // Arrange
+        const string csv = "id,amount,created,flag,score,optionalCreated,optionalFlag\n" +
+                           "42,123.45,2025-01-02T03:04:05.0000000Z,true,,,\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var read = reader.Read();
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(42, reader.GetInt32("id"));
+        Assert.Equal(123.45m, reader.GetDecimal("amount"));
+        Assert.Equal(DateTime.Parse("2025-01-02T03:04:05.0000000Z", CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind), reader.GetDateTime("created"));
+        Assert.True(reader.GetBoolean("flag"));
+        Assert.Null(reader.GetNullableInt32("score"));
+        Assert.Null(reader.GetNullableDateTime("optionalCreated"));
+        Assert.Null(reader.GetNullableBoolean("optionalFlag"));
+    }
+
+    [Fact]
+    public void TypedManualAccessors_ThrowInStrictMode_WhenConversionFails()
+    {
+        // Arrange
+        const string csv = "id\nnot-an-int\n";
+        using var reader = new CsvReader(new StringReader(csv));
+        Assert.True(reader.Read());
+
+        // Act + Assert
+        var exception = Assert.Throws<CsvException>(() => reader.GetInt32("id"));
+        Assert.Contains("Failed to convert field", exception.Message);
+    }
+
+    [Fact]
     public void GetField_GenericByName_UsesConverterOptions()
     {
         // Arrange
@@ -182,5 +245,14 @@ public sealed class CsvReaderApiTests
         public int Id { get; set; }
 
         public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class ReadRowsState(int idIndex, int nameIndex)
+    {
+        public int IdIndex { get; } = idIndex;
+
+        public int NameIndex { get; } = nameIndex;
+
+        public List<ApiRecord> Records { get; } = [];
     }
 }

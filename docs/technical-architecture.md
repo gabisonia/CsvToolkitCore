@@ -101,7 +101,7 @@ Tradeoff:
 Why:
 
 - `TryReadDictionary` / `TryReadRecord<T>` are productive for business code.
-- `TryReadRow` + `GetFieldIndex` + `GetFieldSpan` is better for high-throughput/low-allocation pipelines.
+- `ReadRows` / `TryReadRow` + `GetFieldIndex` + typed manual getters or `GetFieldSpan` is better for high-throughput/low-allocation pipelines.
 - `WriteField(ReadOnlySpan<char>)` gives write-heavy pipelines the same low-level control.
 
 Tradeoff:
@@ -160,7 +160,13 @@ dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*C
 Run manual mapping vs Sep-focused benchmarks:
 
 ```bash
-dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*ManualMapping*" "*Sep_*"
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --anyCategories SepCompare
+```
+
+Run only manual read benchmarks in that comparison set:
+
+```bash
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --allCategories ManualRead SepCompare
 ```
 
 Run async stream-focused benchmarks:
@@ -171,7 +177,8 @@ dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*C
 
 ## Practical Guidance
 
-- Use `CsvReader.GetFieldIndex` once, then `TryReadRow` + `CsvRow.GetFieldSpan(index)` for lowest-allocation manual mapping.
+- Use `CsvReader.GetFieldIndex` once, then `ReadRows(state, static (reader, state) => ...)` with `GetInt32` / `GetDecimal` / `GetDateTime` / `GetBoolean` for fast typed manual mapping.
+- Use `CsvRow.GetFieldSpan(index)` when caller-owned parsing or span-only string inspection is needed.
 - Use `CsvWriter.WriteField(ReadOnlySpan<char>)` + `NextRecord()` for manual low-allocation writes.
 - Use POCO mapping when maintainability is more important than absolute minimum allocations.
 - Prefer stream constructors for very large files and UTF-8 workflows.

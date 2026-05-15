@@ -50,6 +50,29 @@ internal sealed class CsvRowBuffer(int initialCharCapacity) : IDisposable
         _currentFieldStart = _chars.Length;
     }
 
+    public void CompleteInputBufferField(int start, int length, CsvTrimOptions trimOptions, ReadOnlySpan<char> source)
+    {
+        if ((trimOptions & CsvTrimOptions.TrimStart) != 0)
+        {
+            while (length > 0 && char.IsWhiteSpace(source[start]))
+            {
+                start++;
+                length--;
+            }
+        }
+
+        if ((trimOptions & CsvTrimOptions.TrimEnd) != 0)
+        {
+            while (length > 0 && char.IsWhiteSpace(source[start + length - 1]))
+            {
+                length--;
+            }
+        }
+
+        _fields.Add(new CsvFieldToken(start, length, wasQuoted: false, CsvFieldSource.InputBuffer));
+        _currentFieldStart = _chars.Length;
+    }
+
     public bool IsBlankLine()
     {
         return _fields.Count == 1 &&
@@ -60,6 +83,11 @@ internal sealed class CsvRowBuffer(int initialCharCapacity) : IDisposable
     public CsvRow ToRow(long rowIndex, long lineNumber)
     {
         return new CsvRow(_chars.WrittenMemory, _fields.Buffer, _fields.Count, rowIndex, lineNumber);
+    }
+
+    public CsvRow ToRow(long rowIndex, long lineNumber, ReadOnlyMemory<char> inputBuffer)
+    {
+        return new CsvRow(_chars.WrittenMemory, inputBuffer, _fields.Buffer, _fields.Count, rowIndex, lineNumber);
     }
 
     public void Dispose()

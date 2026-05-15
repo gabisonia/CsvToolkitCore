@@ -12,7 +12,7 @@
 
 ## Benchmark Note
 
-[`Sep`](https://github.com/nietras/Sep) is still the fastest option in the latest full benchmark run, but `CsvToolkit.Core` now beats `CsvHelper` in `10/10` common typed scenarios and wins allocations in `3/10` of those scenarios, all on typed write paths. In the current `100k`-row full run, `CsvToolkit.Core` writes typed POCOs in `17.1 ms` vs `22.8 ms` for `CsvHelper`, and writes typed records with converter options in `14.9 ms` vs `19.3 ms`, while allocating far less in both cases. If your only KPI is absolute CSV throughput, [`Sep`](https://github.com/nietras/Sep) remains the speed ceiling; `CsvToolkit.Core` is now much closer while keeping a higher-level typed API and broader feature coverage.
+In the latest focused manual-read benchmark, `CsvToolkit.Core` now beats [`Sep`](https://github.com/nietras/Sep) in `6/6` read scenarios. At `100k` rows, manual reads are `14.190 ms` vs `21.938 ms` for default CSV, `15.873 ms` vs `25.877 ms` for semicolon/high-quote CSV, and `7.179 ms` vs `11.648 ms` for converter-options data. The older full-suite typed POCO table is retained below separately for broader context.
 
 ## NuGet
 
@@ -51,7 +51,7 @@ using var writer = new CsvWriter(streamOrTextWriter, options);
 // Row/field iteration
 while (reader.TryReadRow(out _))
 {
-    int id = reader.GetField<int>("id");
+    int id = reader.GetInt32("id");
     ReadOnlySpan<char> name = reader.GetFieldSpan(1);
     ReadOnlySpan<char> email = reader.GetFieldSpan("email");
     string materialized = reader.GetField("email");
@@ -60,14 +60,16 @@ while (reader.TryReadRow(out _))
 // Manual mapping for throughput-sensitive paths
 var idIndex = reader.GetFieldIndex("id");
 var nameIndex = reader.GetFieldIndex("name");
-while (reader.TryReadRow(out var row))
+
+var state = (IdIndex: idIndex, NameIndex: nameIndex, Items: new List<MyRow>());
+reader.ReadRows(state, static (csv, s) =>
 {
-    var item = new MyRow
+    s.Items.Add(new MyRow
     {
-        Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
-        Name = row.GetFieldString(nameIndex)
-    };
-}
+        Id = csv.GetInt32(s.IdIndex),
+        Name = csv.GetField(s.NameIndex)
+    });
+});
 
 // Dictionary / dynamic
 if (reader.TryReadDictionary(out var dict)) { /* header -> value */ }
@@ -108,6 +110,8 @@ using var dataReader = reader.AsDataReader();
 - Header normalization callback: `PrepareHeaderForMatch`
 - Field access as `ReadOnlySpan<char>` / `ReadOnlyMemory<char>`
 - Name-based low-level field access: `GetFieldSpan(name)`, `GetFieldMemory(name)`, `GetFieldIndex(name, nameIndex)`
+- Fast typed manual access: `GetInt32(...)`, `GetDecimal(...)`, `GetDateTime(...)`, `GetBoolean(...)`, and nullable variants
+- Projection-style manual reads via `ReadRows(state, static (reader, state) => ...)`
 - Typed field access helpers: `GetField<T>(index)` / `GetField<T>(name, nameIndex)`
 - Reader APIs: `TryReadRow`, `ReadAsync`, `TryReadDictionary`, `ReadDictionaryAsync`, `TryReadDynamic`
 - Record APIs: `TryReadRecord<T>`, `ReadRecordAsync<T>`, `GetRecords<T>`, `GetRecordsAsync<T>`
@@ -155,11 +159,11 @@ foreach (var person in people)
 var idIndex = reader.GetFieldIndex("id");
 var nameIndex = reader.GetFieldIndex("name");
 
-while (reader.TryReadRow(out var row))
+reader.ReadRows((IdIndex: idIndex, NameIndex: nameIndex), static (csv, state) =>
 {
-    int id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture);
-    ReadOnlySpan<char> name = row.GetFieldSpan(nameIndex);
-}
+    int id = csv.GetInt32(state.IdIndex);
+    ReadOnlySpan<char> name = csv.GetFieldSpan(state.NameIndex);
+});
 ```
 
 ### Manual Field Writing
@@ -244,7 +248,7 @@ Notes:
 Benchmarks compare `CsvToolkit.Core` with `CsvHelper` and `Sep` for:
 
 - Typed read/write (default mapping)
-- Manual mapped read/write using `TryReadRow`, `GetFieldIndex`, `GetFieldSpan`, and `WriteField(ReadOnlySpan<char>)`
+- Manual mapped read/write using `ReadRows`, `TryReadRow`, `GetFieldIndex`, `GetFieldSpan`, and `WriteField(ReadOnlySpan<char>)`
 - Typed read/write with converter options
 - Async typed read/write for stream-backed APIs
 - Typed read with duplicate headers (`NameIndex`)
@@ -274,7 +278,13 @@ dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*C
 Run manual mapping vs Sep-focused benchmarks:
 
 ```bash
-dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*ManualMapping*" "*Sep_*"
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --anyCategories SepCompare
+```
+
+Run only manual read benchmarks in that comparison set:
+
+```bash
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --allCategories ManualRead SepCompare
 ```
 
 Run the async stream-focused benchmarks:
@@ -301,7 +311,8 @@ OS: `macOS Tahoe 26.3 (25D125) [Darwin 25.3.0]`
 Runtime: `.NET 10.0.0`  
 Command: `dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks*"`
 
-Note: the current benchmark source includes manual mapping rows for direct comparison with `Sep`. Re-run the suite to refresh the table below with those rows.
+Note: the table below is the saved full-suite typed POCO run. A newer focused manual mapping vs `Sep`
+run is included after the common scenario table.
 
 Common scenarios benchmarked across all three libraries:
 
@@ -318,6 +329,33 @@ Common scenarios benchmarked across all three libraries:
 | ReadTyped_WithConverterOptions | 100,000 | 23.674 ms / 12.80 MB | 27.904 ms / 25.81 MB | 10.971 ms / 3.82 MB | Sep (`2.16x`) | Sep (`3.35x` lower) |
 | WriteTyped_WithConverterOptions | 100,000 | 14.878 ms / 8.04 MB | 19.270 ms / 26.60 MB | 7.409 ms / 9.93 MB | Sep (`2.01x`) | CsvToolkit (`1.24x` lower vs Sep) |
 
+Focused manual mapping vs `Sep` run:
+
+Run date: `2026-05-15`
+Runtime: `.NET 10.0.5`
+Command: `dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks/CsvToolkit.Benchmarks.csproj -- --anyCategories SepCompare`
+
+Read rows were refreshed after adding the no-copy buffered row fast path, `ReadRows`, typed manual getters, and span-based custom parsers with:
+`dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks/CsvToolkit.Benchmarks.csproj -- --allCategories ManualRead SepCompare`.
+
+| Scenario | RowCount | CsvToolkit Manual (Mean / Alloc) | Sep (Mean / Alloc) | Time Winner | Allocation Winner |
+|--------- |---------:|----------------------------------:|-------------------:|------------:|------------------:|
+| ReadTyped_ManualMapping | 10,000 | 1.402 ms / 398.01 KB | 2.213 ms / 941.98 KB | CsvToolkit (`1.58x`) | CsvToolkit (`2.37x` lower) |
+| ReadTyped_ManualMapping_SemicolonHighQuote | 10,000 | 1.616 ms / 398.03 KB | 2.403 ms / 941.98 KB | CsvToolkit (`1.49x`) | CsvToolkit (`2.37x` lower) |
+| ReadTyped_ManualMapping_WithConverterOptions | 10,000 | 0.677 ms / 7.30 KB | 1.142 ms / 395.09 KB | CsvToolkit (`1.69x`) | CsvToolkit (`54.12x` lower) |
+| WriteTyped_ManualMapping | 10,000 | 1.700 ms / 2,038.09 KB | 1.312 ms / 2,054.48 KB | Sep (`1.30x`) | CsvToolkit (`1.01x` lower) |
+| WriteTyped_ManualMapping_WithConverterOptions | 10,000 | 1.142 ms / 501.75 KB | 0.780 ms / 715.11 KB | Sep (`1.46x`) | CsvToolkit (`1.43x` lower) |
+| ReadTyped_ManualMapping | 100,000 | 14.190 ms / 3,984.52 KB | 21.938 ms / 9,450.38 KB | CsvToolkit (`1.55x`) | CsvToolkit (`2.37x` lower) |
+| ReadTyped_ManualMapping_SemicolonHighQuote | 100,000 | 15.873 ms / 3,984.55 KB | 25.877 ms / 9,450.38 KB | CsvToolkit (`1.63x`) | CsvToolkit (`2.37x` lower) |
+| ReadTyped_ManualMapping_WithConverterOptions | 100,000 | 7.179 ms / 7.30 KB | 11.648 ms / 3,910.72 KB | CsvToolkit (`1.62x`) | CsvToolkit (`535.71x` lower) |
+| WriteTyped_ManualMapping | 100,000 | 17.272 ms / 16,373.89 KB | 13.091 ms / 16,390.40 KB | Sep (`1.32x`) | CsvToolkit (`1.00x` lower) |
+| WriteTyped_ManualMapping_WithConverterOptions | 100,000 | 11.677 ms / 8,181.85 KB | 8.335 ms / 10,167.00 KB | Sep (`1.40x`) | CsvToolkit (`1.24x` lower) |
+
+Focused manual mapping takeaway:
+- CsvToolkit now wins all `6/6` focused manual read scenarios against `Sep`.
+- CsvToolkit read allocations are lower in all focused manual read scenarios because simple unquoted rows can reuse input-buffer slices.
+- `Sep` remains faster in the focused manual write rows, while CsvToolkit has lower write allocations.
+
 Additional scenarios:
 
 | Scenario | RowCount | CsvToolkit.Core (Mean / Alloc) | CsvHelper (Mean / Alloc) | Time Winner | Allocation Winner |
@@ -327,13 +365,14 @@ Additional scenarios:
 | ReadDictionary vs ReadDynamic | 10,000 | 1.762 ms / 5.26 MB | 4.312 ms / 8.00 MB | CsvToolkit (`2.45x`) | CsvToolkit (`1.52x` lower) |
 | ReadDictionary vs ReadDynamic | 100,000 | 18.355 ms / 52.64 MB | 43.219 ms / 79.41 MB | CsvToolkit (`2.35x`) | CsvToolkit (`1.51x` lower) |
 
-Observed trend from this run:
-- Across the `10` common scenarios benchmarked for all three libraries, `Sep` is the fastest option in `10/10`.
-- On allocations, `Sep` wins `7/10` of those common scenarios and `CsvToolkit.Core` wins `3/10`, all on typed write scenarios.
-- `CsvToolkit.Core` beats `CsvHelper` in `10/10` of those common scenarios.
+Observed trend:
+- In the older full common-scenario run shown above, `Sep` is the fastest option in `10/10`.
+- In that full run, `Sep` wins allocations in `7/10` common scenarios and `CsvToolkit.Core` wins `3/10`, all on typed write scenarios.
+- In that full run, `CsvToolkit.Core` beats `CsvHelper` in `10/10` common scenarios.
+- In the refreshed focused manual read comparison, `CsvToolkit.Core` beats `Sep` in `6/6` read scenarios.
 - In the extra `DuplicateHeader_NameIndex` scenario, `CsvToolkit.Core` beats `CsvHelper` at both sizes.
 - In the extra `ReadDictionary vs ReadDynamic` scenario, `CsvToolkit.Core` beats `CsvHelper` at both sizes.
-- Important caveat for this saved result table: `Sep` is benchmarked here through explicit/manual column mapping and writing, while the listed `CsvToolkit.Core` rows use higher-level typed POCO APIs. The current benchmark source also includes `CsvToolkitCore_*_ManualMapping_*` rows for a direct low-level comparison.
+- Important caveat for the full-suite table: `Sep` is benchmarked there through explicit/manual column mapping and writing, while the listed `CsvToolkit.Core` rows use higher-level typed POCO APIs. Use the focused manual mapping table for the direct low-level comparison.
 
 Benchmark run time:
 - Benchmark execution: `00:14:31` (`871.21 sec`)
