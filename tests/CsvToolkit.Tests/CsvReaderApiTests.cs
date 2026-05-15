@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 
 namespace CsvToolkit.Core.Tests;
 
@@ -20,6 +21,86 @@ public sealed class CsvReaderApiTests
         Assert.True(read);
         Assert.Equal(1, id);
         Assert.Equal("Ada", name);
+    }
+
+    [Fact]
+    public void GetFieldSpan_ByName_ReadsCurrentRowFieldWithoutStringMaterialization()
+    {
+        // Arrange
+        const string csv = "id,name\n1,Ada\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var read = reader.Read();
+        var id = int.Parse(reader.GetFieldSpan("id"), CultureInfo.InvariantCulture);
+        var name = reader.GetFieldSpan("name");
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal(1, id);
+        Assert.True(name.SequenceEqual("Ada"));
+    }
+
+    [Fact]
+    public void GetFieldMemory_ByName_ReadsCurrentRowField()
+    {
+        // Arrange
+        const string csv = "id,name\n1,Ada\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var read = reader.Read();
+        var name = reader.GetFieldMemory("name");
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("Ada", name.ToString());
+    }
+
+    [Fact]
+    public void GetFieldIndex_ResolvesDuplicateHeaderByNameIndex()
+    {
+        // Arrange
+        const string csv = "name,name,age\nAda,Lovelace,36\n";
+        using var reader = new CsvReader(new StringReader(csv));
+
+        // Act
+        var firstNameIndex = reader.GetFieldIndex("name", nameIndex: 0);
+        var lastNameIndex = reader.GetFieldIndex("name", nameIndex: 1);
+        var read = reader.TryReadRow(out var row);
+
+        // Assert
+        Assert.True(read);
+        Assert.Equal("Ada", row.GetFieldString(firstNameIndex));
+        Assert.Equal("Lovelace", row.GetFieldString(lastNameIndex));
+    }
+
+    [Fact]
+    public void TryReadRow_WithPreResolvedIndexes_SupportsManualMapping()
+    {
+        // Arrange
+        const string csv = "id,name\n1,Ada\n2,Bob\n";
+        using var reader = new CsvReader(new StringReader(csv));
+        var idIndex = reader.GetFieldIndex("id");
+        var nameIndex = reader.GetFieldIndex("name");
+        var records = new List<ApiRecord>();
+
+        // Act
+        while (reader.TryReadRow(out var row))
+        {
+            records.Add(new ApiRecord
+            {
+                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
+                Name = row.GetFieldString(nameIndex)
+            });
+        }
+
+        // Assert
+        Assert.Equal(2, records.Count);
+        Assert.Equal(1, records[0].Id);
+        Assert.Equal("Ada", records[0].Name);
+        Assert.Equal(2, records[1].Id);
+        Assert.Equal("Bob", records[1].Name);
     }
 
     [Fact]

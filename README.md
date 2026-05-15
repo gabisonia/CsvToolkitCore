@@ -53,7 +53,20 @@ while (reader.TryReadRow(out _))
 {
     int id = reader.GetField<int>("id");
     ReadOnlySpan<char> name = reader.GetFieldSpan(1);
+    ReadOnlySpan<char> email = reader.GetFieldSpan("email");
     string materialized = reader.GetField("email");
+}
+
+// Manual mapping for throughput-sensitive paths
+var idIndex = reader.GetFieldIndex("id");
+var nameIndex = reader.GetFieldIndex("name");
+while (reader.TryReadRow(out var row))
+{
+    var item = new MyRow
+    {
+        Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
+        Name = row.GetFieldString(nameIndex)
+    };
 }
 
 // Dictionary / dynamic
@@ -66,6 +79,9 @@ writer.WriteHeader<MyRow>();
 writer.WriteRecord(new MyRow());
 var records = new List<MyRow> { new MyRow() };
 writer.WriteRecords(records, writeHeader: false);
+writer.WriteField("manual".AsSpan());
+writer.WriteField("row".AsSpan());
+writer.NextRecord();
 
 // Async
 while (await reader.ReadAsync()) { var current = reader.GetRecord<MyRow>(); }
@@ -91,6 +107,7 @@ using var dataReader = reader.AsDataReader();
 - Error and validation callbacks: `BadDataFound`, `MissingFieldFound`, `HeaderValidated`, `ReadingExceptionOccurred`
 - Header normalization callback: `PrepareHeaderForMatch`
 - Field access as `ReadOnlySpan<char>` / `ReadOnlyMemory<char>`
+- Name-based low-level field access: `GetFieldSpan(name)`, `GetFieldMemory(name)`, `GetFieldIndex(name, nameIndex)`
 - Typed field access helpers: `GetField<T>(index)` / `GetField<T>(name, nameIndex)`
 - Reader APIs: `TryReadRow`, `ReadAsync`, `TryReadDictionary`, `ReadDictionaryAsync`, `TryReadDynamic`
 - Record APIs: `TryReadRecord<T>`, `ReadRecordAsync<T>`, `GetRecords<T>`, `GetRecordsAsync<T>`
@@ -106,6 +123,7 @@ using var dataReader = reader.AsDataReader();
   - custom converters (`ICsvTypeConverter<T>`)
   - global converter options per type via `CsvOptions.ConverterOptions`
 - Writer bulk APIs: `WriteRecords(...)`, `WriteRecordsAsync(...)`
+- Manual writer APIs: `WriteField(ReadOnlySpan<char>)`, `WriteField<T>(...)`, `NextRecord()`
 - CSV injection sanitization for spreadsheet-safe output (`SanitizeForInjection`)
 
 ## Examples
@@ -134,10 +152,32 @@ foreach (var person in people)
 ### Read Without String Allocations
 
 ```csharp
+var idIndex = reader.GetFieldIndex("id");
+var nameIndex = reader.GetFieldIndex("name");
+
 while (reader.TryReadRow(out var row))
 {
-    ReadOnlySpan<char> id = row.GetFieldSpan(0);
-    // parse directly from span
+    int id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture);
+    ReadOnlySpan<char> name = row.GetFieldSpan(nameIndex);
+}
+```
+
+### Manual Field Writing
+
+```csharp
+using var writer = new CsvWriter(File.Create("people.csv"), new CsvOptions { NewLine = "\n" });
+
+writer.WriteField("id".AsSpan());
+writer.WriteField("name".AsSpan());
+writer.NextRecord();
+
+foreach (var person in people)
+{
+    Span<char> idBuffer = stackalloc char[16];
+    person.Id.TryFormat(idBuffer, out var written, default, CultureInfo.InvariantCulture);
+    writer.WriteField(idBuffer[..written]);
+    writer.WriteField(person.Name.AsSpan());
+    writer.NextRecord();
 }
 ```
 
@@ -204,6 +244,7 @@ Notes:
 Benchmarks compare `CsvToolkit.Core` with `CsvHelper` and `Sep` for:
 
 - Typed read/write (default mapping)
+- Manual mapped read/write using `TryReadRow`, `GetFieldIndex`, `GetFieldSpan`, and `WriteField(ReadOnlySpan<char>)`
 - Typed read/write with converter options
 - Async typed read/write for stream-backed APIs
 - Typed read with duplicate headers (`NameIndex`)
@@ -230,6 +271,12 @@ Run one benchmark (faster while iterating):
 dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks.CsvToolkitCore_ReadTyped_Stream*"
 ```
 
+Run manual mapping vs Sep-focused benchmarks:
+
+```bash
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*ManualMapping*" "*Sep_*"
+```
+
 Run the async stream-focused benchmarks:
 
 ```bash
@@ -253,6 +300,8 @@ Machine: `Apple M3 Pro` (`11` logical / `11` physical cores)
 OS: `macOS Tahoe 26.3 (25D125) [Darwin 25.3.0]`  
 Runtime: `.NET 10.0.0`  
 Command: `dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks*"`
+
+Note: the current benchmark source includes manual mapping rows for direct comparison with `Sep`. Re-run the suite to refresh the table below with those rows.
 
 Common scenarios benchmarked across all three libraries:
 
@@ -284,7 +333,7 @@ Observed trend from this run:
 - `CsvToolkit.Core` beats `CsvHelper` in `10/10` of those common scenarios.
 - In the extra `DuplicateHeader_NameIndex` scenario, `CsvToolkit.Core` beats `CsvHelper` at both sizes.
 - In the extra `ReadDictionary vs ReadDynamic` scenario, `CsvToolkit.Core` beats `CsvHelper` at both sizes.
-- Important caveat: `Sep` is benchmarked here through explicit/manual column mapping and writing, while `CsvToolkit.Core` and `CsvHelper` use higher-level typed POCO APIs. Treat `Sep` as a low-level throughput ceiling, not a direct ergonomic equivalent.
+- Important caveat for this saved result table: `Sep` is benchmarked here through explicit/manual column mapping and writing, while the listed `CsvToolkit.Core` rows use higher-level typed POCO APIs. The current benchmark source also includes `CsvToolkitCore_*_ManualMapping_*` rows for a direct low-level comparison.
 
 Benchmark run time:
 - Benchmark execution: `00:14:31` (`871.21 sec`)

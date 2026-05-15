@@ -39,6 +39,7 @@ This document explains what technology `CsvToolkit.Core` uses, how data flows th
 4. `CsvRowBuffer` records field boundaries and row text in pooled memory.
 5. Reader exposes one of several materialization modes:
    - `CsvRow` for low-allocation field slicing
+   - Manual mapping via `GetFieldIndex(...)` + `CsvRow.GetFieldSpan(...)`
    - `Dictionary<string, string?>` / dynamic for flexible schemas
    - POCO mapping via map registry + converters
 
@@ -58,7 +59,8 @@ Key behavior:
    - newline present
    - leading/trailing whitespace
 4. Quote characters inside fields are escaped while streaming segments to output.
-5. Typed values are formatted through:
+5. Manual field writing can use `WriteField(ReadOnlySpan<char>)` to write caller-formatted values without string materialization.
+6. Typed values are formatted through:
    - `ISpanFormattable` fast path when available
    - converter registry / fallback formatting otherwise
 
@@ -99,7 +101,8 @@ Tradeoff:
 Why:
 
 - `TryReadDictionary` / `TryReadRecord<T>` are productive for business code.
-- `TryReadRow` + `GetFieldSpan` is better for high-throughput/low-allocation pipelines.
+- `TryReadRow` + `GetFieldIndex` + `GetFieldSpan` is better for high-throughput/low-allocation pipelines.
+- `WriteField(ReadOnlySpan<char>)` gives write-heavy pipelines the same low-level control.
 
 Tradeoff:
 
@@ -154,6 +157,12 @@ Run focused benchmark:
 dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*CsvReadWriteBenchmarks.CsvToolkitCore_ReadTyped_Stream*"
 ```
 
+Run manual mapping vs Sep-focused benchmarks:
+
+```bash
+dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*ManualMapping*" "*Sep_*"
+```
+
 Run async stream-focused benchmarks:
 
 ```bash
@@ -162,7 +171,8 @@ dotnet run -c Release --project benchmarks/CsvToolkit.Benchmarks -- --filter "*C
 
 ## Practical Guidance
 
-- Use `CsvReader.TryReadRow` + `GetFieldSpan` for lowest allocation.
+- Use `CsvReader.GetFieldIndex` once, then `TryReadRow` + `CsvRow.GetFieldSpan(index)` for lowest-allocation manual mapping.
+- Use `CsvWriter.WriteField(ReadOnlySpan<char>)` + `NextRecord()` for manual low-allocation writes.
 - Use POCO mapping when maintainability is more important than absolute minimum allocations.
 - Prefer stream constructors for very large files and UTF-8 workflows.
 - Use `CsvOptions.CultureInfo` explicitly for locale-sensitive numeric/date data.

@@ -157,7 +157,21 @@ public sealed class CsvReader : IDisposable, IAsyncDisposable
 
     public ReadOnlySpan<char> GetFieldSpan(int index) => CurrentRow.GetFieldSpan(index);
 
+    public ReadOnlySpan<char> GetFieldSpan(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetFieldSpan(index);
+    }
+
     public ReadOnlyMemory<char> GetFieldMemory(int index) => CurrentRow.GetFieldMemory(index);
+
+    public ReadOnlyMemory<char> GetFieldMemory(string name, int nameIndex = 0)
+    {
+        var index = ResolveHeaderIndex(name, nameIndex);
+        return GetFieldMemory(index);
+    }
+
+    public int GetFieldIndex(string name, int nameIndex = 0) => ResolveHeaderIndex(name, nameIndex);
 
     public string GetField(int index) => CurrentRow.GetFieldString(index);
 

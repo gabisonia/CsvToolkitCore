@@ -175,7 +175,7 @@ public sealed class CsvWriter : IDisposable, IAsyncDisposable
         await NextRecordAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private void WriteField(ReadOnlySpan<char> value)
+    public void WriteField(ReadOnlySpan<char> value)
     {
         if (TrySanitizeForInjection(value, out var sanitized))
         {

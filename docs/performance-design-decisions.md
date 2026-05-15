@@ -23,12 +23,14 @@ Benchmarks live in `benchmarks/CsvToolkit.Benchmarks/CsvReadWriteBenchmarks.cs` 
 - Dataset size: `100_000` rows
 - Workloads:
   - Typed read from UTF-8 stream
+  - Manual mapped read from UTF-8 stream
   - Async typed read from UTF-8 stream
   - Dictionary/dynamic read
   - Typed write to stream
+  - Manual mapped write to stream
   - Async typed write to stream
   - Semicolon + high quoting read stress case
-- Baseline library: `CsvHelper`
+- Baseline libraries: `CsvHelper` and `Sep`
 
 Run:
 
@@ -85,6 +87,7 @@ Why it helps:
 - Row text is stored once in a pooled char buffer.
 - Fields are represented by `(start, length, wasQuoted)` metadata, not copied strings.
 - `GetFieldSpan` / `GetFieldMemory` can return direct slices without allocating strings.
+- `GetFieldIndex(...)` lets hot loops resolve header names once and use ordinal field access per row.
 
 Tradeoff:
 
@@ -153,6 +156,7 @@ Why it helps:
 - `ISpanFormattable` values are formatted into stack/pooled char buffers.
 - Quoting/escaping writes segments directly to output, minimizing temporary objects.
 - Tiny reusable scratch buffer (`_charScratch`) avoids per-char allocations.
+- `WriteField(ReadOnlySpan<char>)` lets manual writers pass stack-formatted values directly.
 
 Tradeoff:
 
@@ -195,6 +199,7 @@ Even with low-allocation internals, some APIs intentionally allocate:
 - `CsvRow.GetFieldString(...)` and dictionary/dynamic APIs allocate strings.
 - POCO mapping allocates record instances per row.
 - `TryConvertFallback` may allocate temporary strings for unsupported built-in fast paths.
+- `WriteField<T>(...)` may allocate for general `IFormattable` values; use `WriteField(ReadOnlySpan<char>)` with caller-owned formatting for the lowest-allocation manual write path.
 
 These are intentional for ergonomic APIs; span/memory APIs exist for allocation-sensitive call sites.
 
@@ -210,6 +215,30 @@ These are intentional for ergonomic APIs; span/memory APIs exist for allocation-
 - `CultureInfo`: affects number/date parsing behavior and cost.
 
 Code: `src/CsvToolkit.Core/CsvOptions.cs`
+
+## Manual Mapping Guidance
+
+For Sep-style throughput benchmarks and hot ingestion paths, resolve headers once and parse from spans:
+
+```csharp
+var idIndex = reader.GetFieldIndex("id");
+var nameIndex = reader.GetFieldIndex("name");
+
+while (reader.TryReadRow(out var row))
+{
+    var id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture);
+    var name = row.GetFieldSpan(nameIndex);
+}
+```
+
+For manual writes, format primitives into stack buffers and pass spans to the writer:
+
+```csharp
+Span<char> buffer = stackalloc char[32];
+value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture);
+writer.WriteField(buffer[..written]);
+writer.NextRecord();
+```
 
 ## Latest Benchmark Snapshot
 

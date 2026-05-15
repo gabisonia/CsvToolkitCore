@@ -119,6 +119,40 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    public int CsvToolkitCore_ReadTyped_ManualMapping_Stream()
+    {
+        using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
+        using var reader = new CsvReader(stream, new CsvOptions
+        {
+            HasHeader = true,
+            DetectColumnCount = true,
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        var idIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.Id));
+        var nameIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.Name));
+        var amountIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.Amount));
+        var createdAtIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.CreatedAt));
+        var isActiveIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.IsActive));
+
+        var count = 0;
+        while (reader.TryReadRow(out var row))
+        {
+            _ = new BenchmarkRecord
+            {
+                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
+                Name = row.GetFieldString(nameIndex),
+                Amount = decimal.Parse(row.GetFieldSpan(amountIndex), CultureInfo.InvariantCulture),
+                CreatedAt = DateTime.Parse(row.GetFieldSpan(createdAtIndex), CultureInfo.InvariantCulture),
+                IsActive = bool.Parse(row.GetFieldSpan(isActiveIndex))
+            };
+            count++;
+        }
+
+        return count;
+    }
+
+    [Benchmark]
     public int CsvHelper_ReadTyped_Stream()
     {
         using var stream = new MemoryStream(_csvDefaultUtf8, writable: false);
@@ -230,6 +264,33 @@ public class CsvReadWriteBenchmarks
     }
 
     [Benchmark]
+    public long CsvToolkitCore_WriteTyped_ManualMapping_Stream()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new CsvWriter(stream, new CsvOptions
+        {
+            HasHeader = true,
+            NewLine = "\n",
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        writer.WriteField(nameof(BenchmarkRecord.Id).AsSpan());
+        writer.WriteField(nameof(BenchmarkRecord.Name).AsSpan());
+        writer.WriteField(nameof(BenchmarkRecord.Amount).AsSpan());
+        writer.WriteField(nameof(BenchmarkRecord.CreatedAt).AsSpan());
+        writer.WriteField(nameof(BenchmarkRecord.IsActive).AsSpan());
+        writer.NextRecord();
+
+        foreach (var record in _records)
+        {
+            WriteBenchmarkRecordFields(writer, record);
+        }
+
+        writer.Flush();
+        return stream.Length;
+    }
+
+    [Benchmark]
     public async Task<long> CsvToolkitCore_WriteTypedAsync_Stream()
     {
         await using var stream = new MemoryStream();
@@ -309,6 +370,40 @@ public class CsvReadWriteBenchmarks
         var count = 0;
         while (reader.TryReadRecord<BenchmarkRecord>(out _))
         {
+            count++;
+        }
+
+        return count;
+    }
+
+    [Benchmark]
+    public int CsvToolkitCore_ReadTyped_ManualMapping_SemicolonHighQuote()
+    {
+        using var stream = new MemoryStream(_csvSemicolonQuotedUtf8, writable: false);
+        using var reader = new CsvReader(stream, new CsvOptions
+        {
+            Delimiter = ';',
+            HasHeader = true,
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        var idIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.Id));
+        var nameIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.Name));
+        var amountIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.Amount));
+        var createdAtIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.CreatedAt));
+        var isActiveIndex = reader.GetFieldIndex(nameof(BenchmarkRecord.IsActive));
+
+        var count = 0;
+        while (reader.TryReadRow(out var row))
+        {
+            _ = new BenchmarkRecord
+            {
+                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
+                Name = row.GetFieldString(nameIndex),
+                Amount = decimal.Parse(row.GetFieldSpan(amountIndex), CultureInfo.InvariantCulture),
+                CreatedAt = DateTime.Parse(row.GetFieldSpan(createdAtIndex), CultureInfo.InvariantCulture),
+                IsActive = bool.Parse(row.GetFieldSpan(isActiveIndex))
+            };
             count++;
         }
 
@@ -402,6 +497,37 @@ public class CsvReadWriteBenchmarks
         var count = 0;
         while (reader.TryReadRecord<ConverterOptionsRecord>(out _))
         {
+            count++;
+        }
+
+        return count;
+    }
+
+    [Benchmark]
+    public int CsvToolkitCore_ReadTyped_ManualMapping_WithConverterOptions_Stream()
+    {
+        using var stream = new MemoryStream(_csvConverterOptionsUtf8, writable: false);
+        using var reader = new CsvReader(stream, new CsvOptions
+        {
+            HasHeader = true,
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        var idIndex = reader.GetFieldIndex(nameof(ConverterOptionsRecord.Id));
+        var flagIndex = reader.GetFieldIndex(nameof(ConverterOptionsRecord.Flag));
+        var createdIndex = reader.GetFieldIndex(nameof(ConverterOptionsRecord.Created));
+        var scoreIndex = reader.GetFieldIndex(nameof(ConverterOptionsRecord.Score));
+
+        var count = 0;
+        while (reader.TryReadRow(out var row))
+        {
+            _ = new ConverterOptionsRecord
+            {
+                Id = int.Parse(row.GetFieldSpan(idIndex), CultureInfo.InvariantCulture),
+                Flag = ParseYN(row.GetFieldSpan(flagIndex)),
+                Created = DateTime.ParseExact(row.GetFieldSpan(createdIndex), "dd-MM-yyyy", CultureInfo.InvariantCulture),
+                Score = ParseNullableInt(row.GetFieldSpan(scoreIndex))
+            };
             count++;
         }
 
@@ -509,6 +635,32 @@ public class CsvReadWriteBenchmarks
         foreach (var record in _converterRecords)
         {
             writer.WriteRecord(record);
+        }
+
+        writer.Flush();
+        return stream.Length;
+    }
+
+    [Benchmark]
+    public long CsvToolkitCore_WriteTyped_ManualMapping_WithConverterOptions_Stream()
+    {
+        using var stream = new MemoryStream();
+        using var writer = new CsvWriter(stream, new CsvOptions
+        {
+            HasHeader = true,
+            NewLine = "\n",
+            CultureInfo = CultureInfo.InvariantCulture
+        });
+
+        writer.WriteField(nameof(ConverterOptionsRecord.Id).AsSpan());
+        writer.WriteField(nameof(ConverterOptionsRecord.Flag).AsSpan());
+        writer.WriteField(nameof(ConverterOptionsRecord.Created).AsSpan());
+        writer.WriteField(nameof(ConverterOptionsRecord.Score).AsSpan());
+        writer.NextRecord();
+
+        foreach (var record in _converterRecords)
+        {
+            WriteConverterOptionsRecordFields(writer, record);
         }
 
         writer.Flush();
@@ -743,6 +895,50 @@ public class CsvReadWriteBenchmarks
     private static int? ParseNullableInt(ReadOnlySpan<char> span)
     {
         return span.SequenceEqual("NULL") ? null : int.Parse(span, CultureInfo.InvariantCulture);
+    }
+
+    private static void WriteBenchmarkRecordFields(CsvWriter writer, BenchmarkRecord record)
+    {
+        Span<char> buffer = stackalloc char[64];
+
+        record.Id.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture);
+        writer.WriteField(buffer[..written]);
+
+        writer.WriteField(record.Name.AsSpan());
+
+        record.Amount.TryFormat(buffer, out written, default, CultureInfo.InvariantCulture);
+        writer.WriteField(buffer[..written]);
+
+        record.CreatedAt.TryFormat(buffer, out written, "O", CultureInfo.InvariantCulture);
+        writer.WriteField(buffer[..written]);
+
+        writer.WriteField(record.IsActive ? "true".AsSpan() : "false".AsSpan());
+        writer.NextRecord();
+    }
+
+    private static void WriteConverterOptionsRecordFields(CsvWriter writer, ConverterOptionsRecord record)
+    {
+        Span<char> buffer = stackalloc char[32];
+
+        record.Id.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture);
+        writer.WriteField(buffer[..written]);
+
+        writer.WriteField(record.Flag ? "Y".AsSpan() : "N".AsSpan());
+
+        record.Created.TryFormat(buffer, out written, "dd-MM-yyyy", CultureInfo.InvariantCulture);
+        writer.WriteField(buffer[..written]);
+
+        if (record.Score.HasValue)
+        {
+            record.Score.Value.TryFormat(buffer, out written, default, CultureInfo.InvariantCulture);
+            writer.WriteField(buffer[..written]);
+        }
+        else
+        {
+            writer.WriteField("NULL".AsSpan());
+        }
+
+        writer.NextRecord();
     }
 
     private sealed class BenchmarkRecord

@@ -26,6 +26,24 @@ public sealed class CsvWriterTests
     }
 
     [Fact]
+    public void WriteField_ReadOnlySpan_QuotesWhenNeeded()
+    {
+        // Arrange
+        var options = new CsvOptions { NewLine = "\n" };
+        using var text = new StringWriter();
+        using var writer = new CsvWriter(text, options);
+
+        // Act
+        writer.WriteField("Ada,Lovelace".AsSpan());
+        writer.WriteField("Mathematician".AsSpan());
+        writer.NextRecord();
+        var result = text.ToString();
+
+        // Assert
+        Assert.Equal("\"Ada,Lovelace\",Mathematician\n", result);
+    }
+
+    [Fact]
     public void WriteField_EscapesQuotes()
     {
         // Arrange
